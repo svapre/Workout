@@ -71,7 +71,6 @@ Phone (Strong App)
 |---|---|
 | `setup_dashboard.py` | Applies full visual formatting to the Dashboard tab via Sheets API: 9 metric cards, 2 charts (pushup volume bar chart, duration line chart), personal records, conditional formatting on Daily_Log (green=Full, yellow=Half, red=Skip), dark Catppuccin Mocha theme. |
 | `setup_roadmap.py` | Reads Daily_Log data, auto-detects current progression stage, calculates gate progress percentages, writes the 5-stage roadmap section to the Dashboard tab with color-coded stage nodes and status badges. |
-| `setup_formulas.py` | Writes Google Sheets formulas for dashboard aggregate metrics (COUNTIF, AVERAGE, MAX, etc.) |
 | `dashboard_preview.html` | **Responsive mobile-first web dashboard** that reads live data from the published Google Sheet via CSV URL. Works on any phone browser. Self-contained HTML+CSS+JS, no framework. |
 
 ### Docs & Config
@@ -79,7 +78,6 @@ Phone (Strong App)
 | File | Purpose |
 |---|---|
 | `docs/SETUP.md` | Setup guide: Google Cloud Console project, service account, API enablement |
-| `docs/FORMULAS.md` | Reference for Google Sheets formulas used in the dashboard |
 | `credentials.json` | Service account key (gitignored) |
 | `requirements.txt` | Python dependencies: `pandas`, `gspread` |
 | `sample_data/strong_export.csv` | Sample CSV for testing (comma-delimited, 3 days) |

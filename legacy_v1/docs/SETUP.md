@@ -60,15 +60,12 @@ This guide walks you through setting up the Google Cloud service account, Google
 
 ---
 
-## Step 6: Set Up the Sheet Headers & Formulas
+## Step 6: Set Up the Sheet Headers
 
-The Python script will auto-create headers on first run, but you need to add formulas manually:
+The Python script will auto-create headers on first run:
+`Date | Workout_Type | Duration (min) | Pushup_Volume | Total_Volume | Total_Sets | Exercises | Pain_Level | Energy | Sitting (min) | Notes`
 
-1. Open the `Daily_Log` tab.
-2. After the first run, you'll see headers in row 1: `Date | Workout_Type | Duration (min) | Pushup_Volume | Pain_Level | Energy | Sitting (min) | XP | Streak | Level | Notes`
-3. Paste the formulas from [FORMULAS.md](FORMULAS.md) into cells **H2**, **I2**, and **J2**.
-4. Drag them down to cover ~200 rows.
-5. Set up the `Dashboard` tab using the formulas in the same guide.
+Just run the script once to initialize the `Daily_Log` tab, then run `setup_dashboard.py` to create the visual dashboard.
 
 ---
 
@@ -138,4 +135,4 @@ Your daily routine is simple:
 2. 📱 Export CSV from Strong (Settings → Export).
 3. 💻 Run: `python main.py --csv strong.csv`
 4. ✍️ Open Google Sheet → fill in Pain_Level, Energy, Sitting, Notes for the day.
-5. 🎮 Watch your XP, Streak, and Level update automatically!
+5. 📈 Check your Dashboard to see your rehab progress update automatically!
