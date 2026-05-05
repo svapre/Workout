@@ -65,6 +65,7 @@ export function createApp(root) {
     selectedWorkoutId: initialWorkouts[0]?.id ?? null,
     plans: planService.getAll(),
     activePlans: activePlanService.getAll(),
+    archivedPlans: createLocalStore("workout-app.archivedPlans.v1").list() || [],
     selectedPlanId: null,
     selectedActivePlanId: null,
     planEditMode: false,
@@ -152,6 +153,21 @@ export function createApp(root) {
     deleteActivePlan(planId) {
       activePlanService.deleteActivePlan(planId);
       syncCollections({ activePlans: activePlanService.getAll(), selectedActivePlanId: null, notice: "Deleted active roadmap." });
+    },
+    archivePlan(planId) {
+      const plans = activePlanService.getAll();
+      const plan = plans.find(p => p.id === planId);
+      if (plan) {
+        const archiveStore = createLocalStore("workout-app.archivedPlans.v1");
+        const archived = { ...plan, completedAt: new Date().toISOString() };
+        archiveStore.replaceAll([...(archiveStore.list() || []), archived]);
+        activePlanService.deleteActivePlan(planId);
+        syncCollections({ 
+          activePlans: activePlanService.getAll(), 
+          archivedPlans: archiveStore.list(),
+          notice: `Congratulations! "${plan.name}" has been archived.` 
+        });
+      }
     },
     duplicateRoutine(routineId) {
       const routine = routineService.duplicateRoutine(routineId);
@@ -301,6 +317,7 @@ export function createApp(root) {
     selectedPlanId,
     activePlans,
     selectedActivePlanId,
+    archivedPlans,
     notice,
   } = {}) {
     const nextExercises = exercises ?? store.getState().exercises;
@@ -330,6 +347,7 @@ export function createApp(root) {
       selectedPlanId: nextPlanId,
       activePlans: nextActivePlans,
       selectedActivePlanId: nextActivePlanId,
+      archivedPlans: archivedPlans ?? store.getState().archivedPlans,
       notice: notice ?? store.getState().notice,
     });
   }

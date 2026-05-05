@@ -114,6 +114,10 @@ function renderSelectedRoutine(routine, state) {
             <input data-routine-field="name" type="text" value="${escapeHtml(routine.name)}">
           </div>
           <div class="field">
+            <label>Difficulty Score (1-10)</label>
+            <input data-routine-field="difficultyScore" type="number" min="1" max="10" step="1" value="${routine.difficultyScore ?? 1}">
+          </div>
+          <div class="field">
             <label>Exercise Count</label>
             <input type="text" value="${formatExerciseCount(routine.exercises.length)}" disabled>
           </div>
@@ -159,8 +163,9 @@ export function renderRoutineView(container, { state, actions }) {
                       <h3 class="exercise-card__title" style="font-size: 1.1rem; color: var(--brand);">${escapeHtml(routine.name || "Untitled Routine")}</h3>
                     </div>
                     <p class="muted" style="font-size: 0.9rem; margin-bottom: 24px; flex-grow: 1;">${escapeHtml(routine.notes ? routine.notes.slice(0, 120) + '...' : "No description")}</p>
-                    <div style="font-size: 0.85rem; color: var(--soft); margin-bottom: 16px;">
-                      ${formatExerciseCount(routine.exercises.length)}
+                    <div style="font-size: 0.85rem; color: var(--soft); margin-bottom: 16px; display: flex; justify-content: space-between;">
+                      <span>${formatExerciseCount(routine.exercises.length)}</span>
+                      <span style="color: var(--brand-2); font-weight: 700;">Score: ${routine.difficultyScore ?? 1}</span>
                     </div>
                     <div style="display: flex; gap: 8px; margin-top: auto;">
                       <button class="button button--ghost" data-action="select-routine" data-routine-id="${routine.id}" type="button" style="flex: 1; padding: 8px;">Edit Routine</button>

@@ -1,4 +1,5 @@
 import { evaluateStageProgress } from '../plans/progressionEngine.js';
+import { showModal } from '../../ui/modal.js';
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -68,8 +69,11 @@ export function renderActivePlansView(container, { state, actions }) {
           </div>
           <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); color: var(--text); margin: 0 0 16px; line-height: 1.1;">${escapeHtml(activePlan.name)}</h1>
           <p style="color: var(--soft); max-width: 600px; margin: 0 auto; font-size: 1.1rem; line-height: 1.6;">${escapeHtml(activePlan.description)}</p>
-          <div style="margin-top: 16px;">
+          <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: center;">
              <button class="button button--danger button--ghost" data-action="abandon-plan" data-plan-id="${activePlan.id}" type="button">Abandon Plan</button>
+             ${stages.every(s => evaluateStageProgress(s, state.workouts, state.routines, activePlan).isUnlocked) 
+               ? `<button class="button button--primary" data-action="archive-plan" data-plan-id="${activePlan.id}" type="button" style="background: var(--brand); color: var(--bg);">🏆 Finish & Archive</button>`
+               : ''}
           </div>
         </div>
         
@@ -101,9 +105,20 @@ export function renderActivePlansView(container, { state, actions }) {
 
   container.querySelectorAll('[data-action="abandon-plan"]').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (confirm('Are you sure you want to abandon this active plan?')) {
-        actions.deleteActivePlan(btn.dataset.planId);
-      }
+      showModal(document.body, {
+        title: 'Abandon Plan?',
+        message: 'Are you sure you want to abandon this active plan? Your progress on this specific journey will be lost.',
+        confirmText: 'Abandon Plan',
+        onConfirm: () => {
+          actions.deleteActivePlan(btn.dataset.planId);
+        }
+      });
+    });
+  });
+
+  container.querySelectorAll('[data-action="archive-plan"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      actions.archivePlan(btn.dataset.planId);
     });
   });
 }
@@ -137,7 +152,7 @@ function renderMilestoneGroup(goal, stages, plan, state) {
 
   stages.forEach((s, index) => {
     const isActive = s.id === plan.currentStageId;
-    const progressResult = evaluateStageProgress(s, state.workouts, state.routines);
+    const progressResult = evaluateStageProgress(s, state.workouts, state.routines, plan);
     const { isUnlocked, displayStr } = progressResult;
     
     const alignment = index % 2 === 0 ? 'left' : 'right';

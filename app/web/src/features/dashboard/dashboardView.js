@@ -1,3 +1,5 @@
+import { evaluateStageProgress } from '../plans/progressionEngine.js';
+
 export function renderDashboardView(container, { state, actions }) {
   const activePlans = state.activePlans || [];
 
@@ -45,18 +47,38 @@ export function renderDashboardView(container, { state, actions }) {
           <h2 style="font-size: 1.4rem; margin-bottom: 24px; color: var(--text);">Active Roadmaps</h2>
           <div class="card-grid">
             ${activePlans.map(plan => {
-              const stageCount = plan.stages?.length ?? 0;
-              const currentStage = plan.stages?.find(s => s.id === plan.currentStageId);
+              const stages = plan.stages || [];
+              const stageCount = stages.length;
+              const unlockedCount = stages.filter(s => evaluateStageProgress(s, state.workouts, state.routines, plan).isUnlocked).length;
+              const progressPct = stageCount > 0 ? Math.round((unlockedCount / stageCount) * 100) : 0;
+              
+              const currentStage = stages.find(s => s.id === plan.currentStageId);
               const currentStageName = currentStage?.name || 'Not started';
               const milestoneCount = plan.goals?.length ?? 0;
+              const isCompleted = unlockedCount === stageCount && stageCount > 0;
+
               return `
-                <div class="panel" style="padding: 24px; display: flex; flex-direction: column;">
-                  <div style="display: inline-block; padding: 4px 10px; background: rgba(79, 209, 197, 0.1); border: 1px solid rgba(79, 209, 197, 0.25); border-radius: 999px; color: var(--brand); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; width: fit-content;">Active</div>
+                <div class="panel" style="padding: 24px; display: flex; flex-direction: column; position: relative; overflow: hidden;">
+                  ${isCompleted ? `
+                    <div style="position: absolute; top: 12px; right: 12px; padding: 4px 12px; background: var(--brand); color: var(--bg); font-size: 0.7rem; font-weight: 800; border-radius: 4px; transform: rotate(5deg); box-shadow: 0 4px 10px rgba(79, 209, 197, 0.4);">COMPLETED</div>
+                  ` : ''}
+                  <div style="display: inline-block; padding: 4px 10px; background: rgba(79, 209, 197, 0.1); border: 1px solid rgba(79, 209, 197, 0.25); border-radius: 999px; color: var(--brand); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; width: fit-content;">${isCompleted ? 'Finished' : 'Active'}</div>
                   <h3 style="font-size: 1.2rem; margin: 0 0 8px; color: var(--text);">${escapeHtml(plan.name)}</h3>
-                  <p style="color: var(--soft); font-size: 0.9rem; margin-bottom: 16px; flex-grow: 1;">${escapeHtml(plan.description ? plan.description.slice(0, 100) : '')}</p>
+                  <p style="color: var(--soft); font-size: 0.9rem; margin-bottom: 16px; flex-grow: 1;">${escapeHtml(plan.description ? plan.description.slice(0, 80) + '...' : '')}</p>
+                  
+                  <div style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--soft); margin-bottom: 6px;">
+                      <span>Progress</span>
+                      <span>${progressPct}%</span>
+                    </div>
+                    <div style="height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden;">
+                      <div style="height: 100%; width: ${progressPct}%; background: linear-gradient(90deg, var(--brand), var(--brand-2)); border-radius: 3px; transition: width 0.5s ease-out;"></div>
+                    </div>
+                  </div>
+
                   <div style="display: flex; gap: 12px; font-size: 0.85rem; color: var(--soft); margin-bottom: 12px;">
-                    <span>🏆 ${milestoneCount} milestone${milestoneCount !== 1 ? 's' : ''}</span>
-                    <span>📍 ${stageCount} stage${stageCount !== 1 ? 's' : ''}</span>
+                    <span>🏆 ${milestoneCount} milestones</span>
+                    <span>📍 ${stageCount} stages</span>
                   </div>
                   <div style="padding: 8px 12px; background: rgba(246, 173, 85, 0.08); border: 1px solid rgba(246, 173, 85, 0.2); border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px;">
                     <span style="color: var(--brand-2); font-weight: 700;">Current:</span> <span style="color: var(--text);">${escapeHtml(currentStageName)}</span>

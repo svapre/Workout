@@ -54,6 +54,7 @@ function parseFieldValue(key, value) {
     "targetDurationSec",
     "targetWeightKg",
     "restSec",
+    "difficultyScore",
   ]);
 
   if (!numericFields.has(key)) {
@@ -93,6 +94,7 @@ export function createRoutineService(repository) {
         id: createId("routine"),
         name: routineName,
         notes: "",
+        difficultyScore: 1, // 1-10
         createdAt: now,
         updatedAt: now,
         exercises: [createExercise(1)],
