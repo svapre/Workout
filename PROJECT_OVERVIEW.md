@@ -2,17 +2,15 @@
 
 ## What This Is
 
-An automated fitness & rehabilitation tracking system for a user recovering from a pinched lower-back nerve (lumbar radiculopathy) while preparing for UPSC exams (sedentary lifestyle). It ingests workout data from the **Strong app** (via CSV export), processes it through a Python pipeline, and syncs it to a **Google Sheet** with a visual dashboard and a science-based progression roadmap.
+An automated fitness & rehabilitation tracking system for desk-bound users recovering from injury. It ingests workout data from the **Strong app** (via CSV export), processes it through a Python pipeline, and syncs it to a **Google Sheet** with a visual dashboard and a science-based progression roadmap.
 
 ---
 
-## User Profile
+## Target Profile
 
-- **Physical**: Male, ~175-180 cm, 79 kg
-- **Condition**: Pinched lower-back nerve → occasional right leg/ankle numbness. Heavy spinal compression must be avoided.
-- **Lifestyle**: Sedentary (UPSC prep, long sitting hours)
-- **Current Phase**: Stage 1 — daily 20-min corrective exercises (Surya Namaskar, Bird Dog, Glute Bridge, Band Pull-Aparts)
-- **Philosophy**: Data-driven, no gamification/XP fluff. Clean metrics only.
+- **Physical**: Desk-bound professionals or students with long sitting hours.
+- **Goal**: Transition from sedentary/rehab phase to active strength training.
+- **Philosophy**: Data-driven, clean metrics, and progressive overload with safety gates.
 
 ---
 
@@ -91,7 +89,7 @@ Phone (Strong App)
 ## Google Sheet Structure
 
 **Spreadsheet Name**: `Workout Tracker`
-**Spreadsheet ID**: `1BP3FGWEy5QZerdJkovHD62oyVt4DNsixiq7axkXYuB0`
+**Spreadsheet ID**: `[YOUR_SPREADSHEET_ID]`
 
 ### Daily_Log Tab — Columns
 
@@ -154,8 +152,8 @@ Gate criteria are evaluated in `setup_roadmap.py` and `dashboard_preview.html`.
 
 ## Google Cloud / Auth Setup
 
-- **Project**: `workout-tracker-495404`
-- **Service Account**: `workout-bot@workout-tracker-495404.iam.gserviceaccount.com`
+- **Project**: `[YOUR_PROJECT_ID]`
+- **Service Account**: `[YOUR_SERVICE_ACCOUNT_EMAIL]`
 - **APIs Enabled**: Google Sheets API, Google Drive API
 - **Auth Method**: Service account JSON key (`credentials.json`)
 - **Drive Folder**: "Workout Tracker Inbox" — created by the service account, user shares their own folder with the service account email (Editor access)
@@ -186,10 +184,8 @@ The parser handles both variants automatically.
 - ✅ Google Sheet with formatted dashboard + roadmap
 - ✅ Google Drive integration working (watcher.py)
 - ✅ Mobile-responsive web dashboard (dashboard_preview.html)
-- ✅ Apps Script ready (apps_script.js) — **not yet installed in the sheet**
-- ✅ Cloud Function ready (cloud_function/) — **not yet deployed to GCP**
-- ✅ First real workout logged: 2026-05-05, Full, 25 min
-- ✅ User's Strong export format confirmed: semicolon-delimited, Duration in seconds
+- ✅ Apps Script ready (apps_script.js)
+- ✅ Cloud Function ready (cloud_function/)
 
 ### Pending / TODO
 

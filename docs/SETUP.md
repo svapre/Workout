@@ -34,7 +34,7 @@ This guide walks you through setting up the Google Cloud service account, Google
 6. Go to the **Keys** tab → **Add Key → Create new key → JSON**.
 7. A `.json` file will download. **Save it as `credentials.json`** in the project root:
    ```
-   d:\code\Workout\credentials.json
+   /your/project/path/credentials.json
    ```
 
 > ⚠️ **Keep this file secret!** It's already in `.gitignore`.
@@ -113,7 +113,7 @@ python main.py --csv strong_export.csv
 
 ### With custom paths:
 ```bash
-python main.py --csv "C:\Users\Shivam\Downloads\strong.csv" --creds "credentials.json" --sheet "Workout Tracker"
+python main.py --csv "/path/to/strong.csv" --creds "credentials.json" --sheet "Workout Tracker"
 ```
 
 ---
