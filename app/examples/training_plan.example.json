@@ -1,0 +1,87 @@
+{
+  "type": "training_plan",
+  "planName": "Rehab To Strength Base",
+  "goals": [
+    "Rebuild consistency",
+    "Track session structure cleanly",
+    "Preserve exercise reference links"
+  ],
+  "exerciseCatalog": [
+    {
+      "slug": "side-plank",
+      "name": "Side Plank",
+      "aliases": ["side bridge"],
+      "category": "rehab",
+      "movementPattern": "anti-lateral-flexion",
+      "equipment": ["bodyweight"],
+      "primaryMuscles": ["obliques", "core"],
+      "secondaryMuscles": ["glutes", "shoulders"],
+      "summary": "An isometric trunk stability drill focused on resisting side bending.",
+      "whyItHelps": "Useful when building core endurance and lateral stability.",
+      "sourceName": "Manual import",
+      "sourceUrl": "https://plainexercise.com/"
+    }
+  ],
+  "routines": [
+    {
+      "name": "Stage 1 Rehab",
+      "notes": "Use this on low-energy or rehab-focused days.",
+      "exercises": [
+        {
+          "name": "Surya Namaskar",
+          "exerciseSlug": "surya-namaskar",
+          "mode": "reps+time",
+          "targetSets": 3,
+          "targetReps": 12,
+          "targetDurationSec": 300,
+          "targetWeightKg": 0,
+          "restSec": 30,
+          "notes": "Smooth tempo"
+        },
+        {
+          "name": "Bird Dog",
+          "exerciseSlug": "bird-dog",
+          "mode": "reps+time",
+          "targetSets": 3,
+          "targetReps": 10,
+          "targetDurationSec": 60,
+          "targetWeightKg": 0,
+          "restSec": 30
+        },
+        {
+          "name": "Side Plank",
+          "exerciseSlug": "side-plank",
+          "mode": "time-only",
+          "targetSets": 3,
+          "targetDurationSec": 30,
+          "targetWeightKg": 0,
+          "restSec": 30
+        }
+      ]
+    },
+    {
+      "name": "Upper Base",
+      "notes": "Simple base plan for push and pull work.",
+      "exercises": [
+        {
+          "name": "Incline Push-up",
+          "exerciseSlug": "incline-push-up",
+          "mode": "reps-only",
+          "targetSets": 4,
+          "targetReps": 10,
+          "targetWeightKg": 0,
+          "restSec": 60
+        },
+        {
+          "name": "Band Row",
+          "exerciseSlug": "band-row",
+          "mode": "reps-only",
+          "targetSets": 4,
+          "targetReps": 12,
+          "targetWeightKg": 0,
+          "restSec": 45
+        }
+      ]
+    }
+  ]
+}

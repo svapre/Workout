@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#181825">
+<title>Workout Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --base: #181825; --mantle: #1e1e2e; --surface0: #313244; --surface1: #45475a;
+    --overlay0: #6c7086; --text: #cdd6f4; --subtext: #a6adc8; --dim: #585b70;
+    --green: #a6e3a1; --blue: #89b4fa; --pink: #f5c2e7; --mauve: #cba6f7;
+    --yellow: #f9e2af; --teal: #94e2d5; --red: #f38ba8; --dark: #1e1e2e;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--base); color: var(--text);
+    min-height: 100vh; min-height: 100dvh;
+    padding: 16px; padding-top: env(safe-area-inset-top, 16px);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Loading */
+  .loading { text-align:center; padding:60px 20px; color:var(--subtext); }
+  .loading .spinner {
+    width:32px;height:32px;border:3px solid var(--surface0);border-top-color:var(--blue);
+    border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* Title */
+  .header {
+    background: var(--mantle); border-radius:16px; padding:20px 16px 16px;
+    text-align:center; margin-bottom:14px;
+  }
+  .header h1 { font-size:20px; font-weight:800; letter-spacing:0.5px; }
+  .header p { font-size:11px; color:var(--subtext); font-style:italic; margin-top:4px; }
+
+  /* Cards grid */
+  .cards { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px; }
+  @media (max-width: 400px) { .cards { grid-template-columns: 1fr 1fr; } }
+  .card { border-radius:12px; overflow:hidden; }
+  .card-label {
+    background:var(--surface0); color:var(--subtext); font-size:9px; font-weight:700;
+    text-align:center; padding:8px 4px 4px; text-transform:uppercase; letter-spacing:0.6px;
+  }
+  .card-value {
+    font-size:22px; font-weight:800; text-align:center; padding:8px 4px 12px; color:var(--dark);
+  }
+  @media (min-width: 500px) { .card-value { font-size: 28px; } }
+
+  /* Section headers */
+  .section {
+    background:var(--surface1); border-radius:10px; text-align:center;
+    font-size:11px; font-weight:700; padding:9px; margin:14px 0 10px;
+    letter-spacing:1px; text-transform:uppercase;
+  }
+
+  /* Chart containers */
+  .chart-wrap {
+    background:var(--surface0); border-radius:12px; padding:14px; margin-bottom:10px;
+  }
+  .chart-wrap h3 { font-size:11px; font-weight:600; margin-bottom:10px; text-align:center; }
+  .chart-bars { display:flex; align-items:flex-end; gap:6px; height:100px; justify-content:center; overflow-x:auto; }
+  .chart-bar-item { display:flex; flex-direction:column; align-items:center; min-width:28px; }
+  .chart-bar {
+    width:100%; max-width:36px; min-height:2px; border-radius:4px 4px 0 0;
+    background:var(--green); transition:height 0.4s ease;
+  }
+  .chart-bar-val { font-size:8px; font-weight:700; color:var(--green); margin-bottom:2px; }
+  .chart-bar-lbl { font-size:7px; color:var(--dim); margin-top:3px; white-space:nowrap; }
+
+  /* Roadmap */
+  .roadmap { margin-top:4px; }
+  .stage {
+    border-radius:12px; overflow:hidden; margin-bottom:10px;
+    border:2px solid var(--surface0); position:relative;
+  }
+  .stage.active { border-color:var(--yellow); }
+  .stage.completed { border-color:var(--green); opacity:0.85; }
+  .stage.locked { opacity:0.35; }
+  .stage-bar { position:absolute; left:0; top:0; bottom:0; width:4px; }
+  .stage-body { padding:12px 14px 12px 18px; }
+  .stage-top { display:flex; justify-content:space-between; align-items:center; }
+  .stage-name { font-size:13px; font-weight:700; }
+  .stage-sub { font-size:9px; color:var(--subtext); font-style:italic; margin-top:2px; }
+  .badge {
+    font-size:8px; font-weight:700; padding:3px 10px; border-radius:20px;
+    text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap;
+  }
+  .badge-active { background:var(--yellow); color:var(--dark); }
+  .badge-done { background:var(--green); color:var(--dark); }
+  .badge-locked { background:var(--mantle); color:var(--dim); }
+  .stage-goal { font-size:10px; color:var(--text); margin:8px 0 6px; }
+  .stage-focus { font-size:9px; color:var(--subtext); margin:2px 0; padding-left:10px; position:relative; }
+  .stage-focus::before { content:"·"; position:absolute; left:0; color:var(--dim); }
+  .gate-box {
+    margin-top:8px; padding:7px 10px; background:var(--surface1); border-radius:8px;
+    font-size:9px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;
+  }
+  .gate-lbl { font-weight:700; color:var(--subtext); }
+  .gate-prog { color:var(--yellow); font-weight:600; font-size:8px; }
+  .progress-track { margin-top:6px; height:4px; background:var(--surface0); border-radius:2px; overflow:hidden; }
+  .progress-fill { height:100%; border-radius:2px; background:linear-gradient(90deg,var(--yellow),var(--teal)); transition:width 0.6s; }
+
+  /* Refresh */
+  .refresh-bar {
+    text-align:center; padding:12px 0; font-size:9px; color:var(--dim);
+  }
+  .refresh-bar button {
+    background:var(--surface0); border:none; color:var(--blue); padding:6px 16px;
+    border-radius:20px; font-size:10px; font-weight:600; cursor:pointer; margin-left:8px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="loading">
+    <div class="spinner"></div>
+    <div>Loading your workout data...</div>
+  </div>
+</div>
+
+<script>
+const SHEET_ID = "1BP3FGWEy5QZerdJkovHD62oyVt4DNsixiq7axkXYuB0";
+const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=0`;
+
+const STAGES = [
+  { name:"Stage 1 — Foundation", sub:"Build the Habit (McGill Phase 1-2)", color:"var(--green)",
+    goal:"Daily corrective work for 3+ weeks. Pain centralizing.",
+    focus:["Surya Namaskar, Bird Dog, Glute Bridge","Band Pull-Aparts for posture","20 min/day, consistency over intensity"],
+    gate:{desc:"14 Full workouts + Pain trending Better", full:14, consist:60, pain:5}},
+  { name:"Stage 2 — Motor Control", sub:"Core Endurance (McGill Phase 2-3)", color:"var(--blue)",
+    goal:"Push-ups, side planks, bodyweight squats. 25+ min sessions.",
+    focus:["McGill Big 3: Bird Dog, Curl-Up, Side Plank","Push-ups (building to 3x10)","Bodyweight squat pattern (hip hinge)"],
+    gate:{desc:"Push-up volume >= 30/session + 25 Full workouts", full:25, pushup:30, dur:25}},
+  { name:"Stage 3 — Graded Loading", sub:"Light Resistance (McGill Phase 3)", color:"var(--yellow)",
+    goal:"Resistance bands and light dumbbells. No spinal compression.",
+    focus:["Resistance band rows, pull-aparts","Goblet squats, Romanian deadlifts","Farmers carries for spinal endurance"],
+    gate:{desc:"Total volume > 5000 + 40 Full workouts", full:40, vol:5000, dur:30}},
+  { name:"Stage 4 — Strength Building", sub:"Progressive Overload (ACSM)", color:"var(--mauve)",
+    goal:"Structured programs, progressive weight increase.",
+    focus:["Trap bar deadlift","Bench press, overhead press","3-4x/week program"],
+    gate:{desc:"Sustained 12+ weeks, no pain regression", full:80, vol:20000}},
+  { name:"Stage 5 — Maintenance", sub:"Lifetime Practice", color:"var(--teal)",
+    goal:"Ongoing strength training with corrective warmups.",
+    focus:["Maintain McGill warmup","3-5x/week progressive overload","Annual mobility check-ins"],
+    gate:null},
+];
+
+function parseCSV(text) {
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map(h => h.replace(/"/g,"").trim());
+  return lines.slice(1).map(line => {
+    const vals = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+    const obj = {};
+    headers.forEach((h,i) => obj[h] = (vals[i]||"").replace(/"/g,"").trim());
+    return obj;
+  });
+}
+
+function calcMetrics(rows) {
+  const m = { total:rows.length, full:0, half:0, skip:0, durations:[], pushups:[], totalVol:0, totalSets:0 };
+  rows.forEach(r => {
+    const type = r["Workout_Type"] || "";
+    if (type==="Full") m.full++;
+    else if (type==="Half") m.half++;
+    else m.skip++;
+    const dur = parseInt(r["Duration (min)"])||0;
+    if (dur) m.durations.push(dur);
+    const pv = parseInt(r["Pushup_Volume"])||0;
+    m.pushups.push(pv);
+    m.totalVol += parseInt(r["Total_Volume"])||0;
+    m.totalSets += parseInt(r["Total_Sets"])||0;
+  });
+  m.avgDur = m.durations.length ? (m.durations.reduce((a,b)=>a+b,0)/m.durations.length).toFixed(1) : "0";
+  m.totalPushups = m.pushups.reduce((a,b)=>a+b,0);
+  m.maxPushup = Math.max(...m.pushups, 0);
+  m.maxDur = Math.max(...m.durations, 0);
+  m.consistency = m.total ? Math.round((m.full+m.half)/m.total*100) : 0;
+  return m;
+}
+
+function detectStage(m) {
+  const checks = [
+    ()=> m.full>=14 && m.consistency>=60,
+    ()=> m.full>=25 && m.maxPushup>=30 && parseFloat(m.avgDur)>=25,
+    ()=> m.full>=40 && m.totalVol>=5000 && parseFloat(m.avgDur)>=30,
+    ()=> m.full>=80 && m.totalVol>=20000,
+  ];
+  let stage = 0;
+  for (let i=0;i<checks.length;i++) { if(checks[i]()) stage=i+1; else break; }
+  return Math.min(stage, STAGES.length-1);
+}
+
+function gateProgress(stageIdx, m) {
+  const g = STAGES[stageIdx].gate;
+  if (!g) return {pct:100,parts:[]};
+  const items=[];
+  if (g.full) items.push({done:m.full/g.full, label:`Full: ${m.full}/${g.full}`});
+  if (g.consist) items.push({done:m.consistency/g.consist, label:`Consistency: ${m.consistency}%/${g.consist}%`});
+  if (g.pain) items.push({done:0, label:`Pain Better: 0/${g.pain}`});
+  if (g.pushup) items.push({done:m.maxPushup/g.pushup, label:`Max Pushups: ${m.maxPushup}/${g.pushup}`});
+  if (g.dur) items.push({done:parseFloat(m.avgDur)/g.dur, label:`Avg Dur: ${m.avgDur}/${g.dur}m`});
+  if (g.vol) items.push({done:m.totalVol/g.vol, label:`Volume: ${m.totalVol}/${g.vol}`});
+  const pct = items.length ? Math.round(items.reduce((s,i)=>s+Math.min(i.done,1),0)/items.length*100) : 100;
+  return {pct, parts:items.map(i=>i.label)};
+}
+
+function render(rows, m) {
+  const cur = detectStage(m);
+  const dates = rows.map(r=>r.Date||"").filter(Boolean);
+  const last7 = dates.slice(-7);
+
+  let html = `
+  <div class="header">
+    <h1>WORKOUT TRACKER</h1>
+    <p>Stage ${cur+1} — ${STAGES[cur].name.split("—")[1]?.trim()||STAGES[cur].name}</p>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="card-label">Total</div><div class="card-value" style="background:var(--green)">${m.total}</div></div>
+    <div class="card"><div class="card-label">Full</div><div class="card-value" style="background:var(--blue)">${m.full}</div></div>
+    <div class="card"><div class="card-label">Consistency</div><div class="card-value" style="background:var(--pink)">${m.consistency}%</div></div>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="card-label">Avg Duration</div><div class="card-value" style="background:var(--blue)">${m.avgDur}m</div></div>
+    <div class="card"><div class="card-label">Pushup Reps</div><div class="card-value" style="background:var(--green)">${m.totalPushups}</div></div>
+    <div class="card"><div class="card-label">Volume</div><div class="card-value" style="background:var(--yellow)">${m.totalVol}</div></div>
+  </div>
+
+  <div class="section">Pushup History</div>
+  <div class="chart-wrap">
+    <div class="chart-bars">`;
+
+  const maxP = Math.max(...m.pushups, 1);
+  rows.forEach((r,i) => {
+    const v = parseInt(r["Pushup_Volume"])||0;
+    const h = Math.max(v/maxP*80, 2);
+    const d = (r.Date||"").slice(5);
+    html += `<div class="chart-bar-item">
+      <div class="chart-bar-val">${v||""}</div>
+      <div class="chart-bar" style="height:${h}px${v===0?";opacity:0.2":""}"></div>
+      <div class="chart-bar-lbl">${d}</div>
+    </div>`;
+  });
+
+  html += `</div></div>
+
+  <div class="section">Personal Records</div>
+  <div class="cards">
+    <div class="card"><div class="card-label">Best Pushups</div><div class="card-value" style="background:var(--teal)">${m.maxPushup}</div></div>
+    <div class="card"><div class="card-label">Longest</div><div class="card-value" style="background:var(--mauve)">${m.maxDur}m</div></div>
+    <div class="card"><div class="card-label">Sets Done</div><div class="card-value" style="background:var(--yellow)">${m.totalSets}</div></div>
+  </div>
+
+  <div class="section">Progression Roadmap</div>
+  <div class="roadmap">`;
+
+  STAGES.forEach((s,i) => {
+    const done = i < cur, active = i === cur, locked = i > cur;
+    const cls = done?"completed":active?"active":"locked";
+    const {pct, parts} = active ? gateProgress(i,m) : {pct:0,parts:[]};
+
+    html += `<div class="stage ${cls}">
+      <div class="stage-bar" style="background:${s.color}"></div>
+      <div class="stage-body">
+        <div class="stage-top">
+          <div><div class="stage-name">${s.name}</div><div class="stage-sub">${s.sub}</div></div>
+          <span class="badge ${done?"badge-done":active?"badge-active":"badge-locked"}">${done?"Done":active?`${pct}%`:"Locked"}</span>
+        </div>
+        ${active||done?`<div class="stage-goal">${s.goal}</div>`:""}
+        ${(active||done)?s.focus.map(f=>`<div class="stage-focus">${f}</div>`).join(""):""}
+        ${s.gate?`<div class="gate-box">
+          <span class="gate-lbl">GATE: ${s.gate.desc}</span>
+          ${active?`<span class="gate-prog">${parts.join(" | ")}</span>`:""}
+        </div>`:""}
+        ${active?`<div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>`:""}
+      </div>
+    </div>`;
+  });
+
+  html += `</div>
+  <div class="refresh-bar">
+    Updated: ${new Date().toLocaleString()}
+    <button onclick="location.reload()">Refresh</button>
+  </div>`;
+
+  document.getElementById("app").innerHTML = html;
+}
+
+// Fetch data
+fetch(CSV_URL)
+  .then(r => r.text())
+  .then(text => {
+    const rows = parseCSV(text);
+    const m = calcMetrics(rows);
+    render(rows, m);
+  })
+  .catch(err => {
+    document.getElementById("app").innerHTML =
+      `<div class="loading" style="color:var(--red)">Failed to load data.<br><small>${err.message}</small></div>`;
+  });
+</script>
+</body>
+</html>

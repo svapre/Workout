@@ -1,0 +1,6 @@
+routine_name,exercise_order,exercise_name,exercise_slug,mode,target_sets,target_reps,target_duration_sec,target_weight_kg,rest_sec,notes
+Stage 1 Rehab,1,Surya Namaskar,surya-namaskar,reps+time,3,12,300,0,30,Warmup
+Stage 1 Rehab,2,Bird Dog,bird-dog,reps+time,3,10,60,0,30,Per side
+Stage 1 Rehab,3,Glute Bridge,glute-bridge,reps-only,3,15,,0,45,Pause at the top
+Push-up Base,1,Incline Push-up,incline-push-up,reps-only,4,10,,0,60,Use a stable surface
+Push-up Base,2,Band Row,band-row,reps-only,4,12,,0,45,Control the eccentric

@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "title": "Workout Tracker",
+  "theme": {
+    "palette": {
+      "base": "#181825",
+      "mantle": "#1e1e2e",
+      "surface0": "#313244",
+      "surface1": "#45475a",
+      "text": "#cdd6f4",
+      "subtext": "#a6adc8",
+      "green": "#a6e3a1",
+      "blue": "#89b4fa",
+      "pink": "#f5c2e7",
+      "yellow": "#f9e2af",
+      "teal": "#94e2d5",
+      "red": "#f38ba8"
+    },
+    "radius": {
+      "card": 12,
+      "section": 10
+    },
+    "font": {
+      "family": "Inter, system-ui, sans-serif"
+    }
+  },
+  "datasets": {
+    "workouts": {
+      "type": "csv",
+      "path": "workouts.csv",
+      "date_field": "workout_date"
+    },
+    "sets": {
+      "type": "csv",
+      "path": "sets.csv",
+      "date_field": "workout_date"
+    },
+    "routines": {
+      "type": "csv",
+      "path": "routines.csv"
+    }
+  },
+  "metrics": {
+    "total_workouts": {
+      "aggregate": "count",
+      "dataset": "workouts",
+      "default": 0
+    },
+    "full_workouts": {
+      "aggregate": "count",
+      "dataset": "workouts",
+      "filters": [
+        {
+          "field": "classification",
+          "op": "eq",
+          "value": "Full"
+        }
+      ],
+      "default": 0
+    },
+    "half_workouts": {
+      "aggregate": "count",
+      "dataset": "workouts",
+      "filters": [
+        {
+          "field": "classification",
+          "op": "eq",
+          "value": "Half"
+        }
+      ],
+      "default": 0
+    },
+    "avg_duration_min": {
+      "aggregate": "avg",
+      "dataset": "workouts",
+      "field": "workout_duration_sec",
+      "transform": "seconds_to_minutes",
+      "round": 1,
+      "default": 0
+    },
+    "longest_workout_min": {
+      "aggregate": "max",
+      "dataset": "workouts",
+      "field": "workout_duration_sec",
+      "transform": "seconds_to_minutes",
+      "round": 1,
+      "default": 0
+    },
+    "total_pushups": {
+      "aggregate": "sum",
+      "dataset": "workouts",
+      "field": "pushup_volume",
+      "default": 0
+    },
+    "best_pushup_session": {
+      "aggregate": "max",
+      "dataset": "workouts",
+      "field": "pushup_volume",
+      "default": 0
+    },
+    "total_volume": {
+      "aggregate": "sum",
+      "dataset": "workouts",
+      "field": "total_volume",
+      "default": 0
+    },
+    "total_sets": {
+      "aggregate": "sum",
+      "dataset": "workouts",
+      "field": "total_sets",
+      "default": 0
+    },
+    "pain_better_count": {
+      "aggregate": "count",
+      "dataset": "workouts",
+      "filters": [
+        {
+          "field": "pain_level",
+          "op": "eq",
+          "value": "Better"
+        }
+      ],
+      "default": 0
+    },
+    "consistency_pct": {
+      "formula": "round(((full_workouts + half_workouts) / max(total_workouts, 1)) * 100, 0)",
+      "default": 0
+    }
+  },
+  "sections": [
+    {
+      "type": "hero",
+      "title": "Workout Tracker",
+      "subtitle": "Progression dashboard generated from config"
+    },
+    {
+      "type": "stat_cards",
+      "title": "Overview",
+      "columns": 3,
+      "cards": [
+        {
+          "label": "Total",
+          "metric": "total_workouts",
+          "color": "green"
+        },
+        {
+          "label": "Full",
+          "metric": "full_workouts",
+          "color": "blue"
+        },
+        {
+          "label": "Consistency",
+          "metric": "consistency_pct",
+          "suffix": "%",
+          "color": "pink"
+        }
+      ]
+    },
+    {
+      "type": "stat_cards",
+      "title": "Training",
+      "columns": 3,
+      "cards": [
+        {
+          "label": "Avg Duration",
+          "metric": "avg_duration_min",
+          "suffix": "m",
+          "color": "blue"
+        },
+        {
+          "label": "Pushup Reps",
+          "metric": "total_pushups",
+          "color": "green"
+        },
+        {
+          "label": "Volume",
+          "metric": "total_volume",
+          "color": "yellow"
+        }
+      ]
+    },
+    {
+      "type": "bar_chart",
+      "title": "Pushup History",
+      "dataset": "sets",
+      "group_by": "workout_date",
+      "series": [
+        {
+          "label": "Pushup Reps",
+          "aggregate": "sum",
+          "field": "actual_reps",
+          "filters": [
+            {
+              "field": "exercise_name",
+              "op": "contains_ci",
+              "value": "push"
+            }
+          ],
+          "color": "green"
+        }
+      ]
+    },
+    {
+      "type": "stat_cards",
+      "title": "Personal Records",
+      "columns": 3,
+      "cards": [
+        {
+          "label": "Best Pushups",
+          "metric": "best_pushup_session",
+          "color": "teal"
+        },
+        {
+          "label": "Longest",
+          "metric": "longest_workout_min",
+          "suffix": "m",
+          "color": "pink"
+        },
+        {
+          "label": "Sets Done",
+          "metric": "total_sets",
+          "color": "yellow"
+        }
+      ]
+    },
+    {
+      "type": "roadmap",
+      "title": "Progression Roadmap",
+      "progression_source": "progression_config.json",
+      "metric_bindings": {
+        "full_workouts_min": "full_workouts",
+        "consistency_pct_min": "consistency_pct",
+        "pain_better_count_min": "pain_better_count",
+        "pushup_session_max_min": "best_pushup_session",
+        "avg_duration_min": "avg_duration_min",
+        "total_volume_min": "total_volume"
+      }
+    }
+  ]
+}

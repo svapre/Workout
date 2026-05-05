@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "stages": [
+    {
+      "name": "Stage 1 - Foundation",
+      "subtitle": "Build the Habit",
+      "goal": "Daily corrective work for 3+ weeks. Pain centralizing.",
+      "color": "green",
+      "focus": [
+        "Surya Namaskar, Bird Dog, Glute Bridge",
+        "Band Pull-Aparts for posture",
+        "20 min/day, consistency over intensity"
+      ],
+      "gate": {
+        "description": "14 Full workouts + Pain trending Better + 60% consistency",
+        "full_workouts_min": 14,
+        "consistency_pct_min": 60,
+        "pain_better_count_min": 5
+      }
+    },
+    {
+      "name": "Stage 2 - Motor Control",
+      "subtitle": "Core Endurance",
+      "goal": "Add push-ups, side planks, bodyweight squats. 25+ min sessions.",
+      "color": "blue",
+      "focus": [
+        "McGill Big 3: Bird Dog, Curl-Up, Side Plank",
+        "Push-ups building to 3x10",
+        "Bodyweight squat pattern and hip hinge"
+      ],
+      "gate": {
+        "description": "25 Full workouts + 30 pushups/session + 25 min average duration",
+        "full_workouts_min": 25,
+        "pushup_session_max_min": 30,
+        "avg_duration_min": 25
+      }
+    },
+    {
+      "name": "Stage 3 - Graded Loading",
+      "subtitle": "Light Resistance",
+      "goal": "Introduce resistance bands and light dumbbells. No spinal compression.",
+      "color": "yellow",
+      "focus": [
+        "Resistance band rows and pull-aparts",
+        "Goblet squats and Romanian deadlifts",
+        "Farmers carries for spinal endurance"
+      ],
+      "gate": {
+        "description": "40 Full workouts + 5000 total volume + 30 min average duration",
+        "full_workouts_min": 40,
+        "total_volume_min": 5000,
+        "avg_duration_min": 30
+      }
+    },
+    {
+      "name": "Stage 4 - Strength Building",
+      "subtitle": "Progressive Overload",
+      "goal": "Structured programs with progressive weight increase.",
+      "color": "pink",
+      "focus": [
+        "Trap bar deadlift or spinal-safe hip hinge",
+        "Bench press and overhead press",
+        "Structured 3-4x/week program"
+      ],
+      "gate": {
+        "description": "80 Full workouts + 20000 total volume",
+        "full_workouts_min": 80,
+        "total_volume_min": 20000
+      }
+    },
+    {
+      "name": "Stage 5 - Maintenance",
+      "subtitle": "Lifetime Practice",
+      "goal": "Ongoing strength training with daily corrective warmups.",
+      "color": "teal",
+      "focus": [
+        "Maintain McGill warmup routine",
+        "Train 3-5x/week with progressive overload",
+        "Annual mobility and nerve health check-ins"
+      ],
+      "gate": null
+    }
+  ]
+}
