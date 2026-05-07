@@ -1,8 +1,13 @@
-export function createRoutineRepository(localStore, seedFactory) {
+import { migrateRoutine } from "../schemaMigration.js";
+
+export function createRoutineRepository(localStore, seedFactory, options = {}) {
+  const { getExerciseCatalog } = options;
+
   const seeded = localStore.load();
+  const catalog = typeof getExerciseCatalog === "function" ? getExerciseCatalog() : [];
   let routines = Array.isArray(seeded?.routines) && seeded.routines.length
-    ? seeded.routines
-    : seedFactory();
+    ? seeded.routines.map((r) => migrateRoutine(r, catalog))
+    : seedFactory().map((r) => migrateRoutine(r, catalog));
 
   persist();
 
@@ -15,7 +20,8 @@ export function createRoutineRepository(localStore, seedFactory) {
       return structuredClone(routines);
     },
     replaceAll(nextRoutines) {
-      routines = structuredClone(nextRoutines);
+      const cat = typeof getExerciseCatalog === "function" ? getExerciseCatalog() : [];
+      routines = structuredClone(nextRoutines).map((r) => migrateRoutine(r, cat));
       persist();
     },
   };

@@ -1,5 +1,7 @@
 function sortByStartedAtDesc(workouts) {
-  return [...workouts].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+  return [...workouts].sort((left, right) =>
+    (right.startedAt || "").localeCompare(left.startedAt || ""),
+  );
 }
 
 export function createWorkoutService(repository) {
@@ -13,16 +15,20 @@ export function createWorkoutService(repository) {
     getById(workoutId) {
       return repository.list().find((workout) => workout.id === workoutId) ?? null;
     },
+    appendSession(session) {
+      repository.appendSession(session);
+      return this.getAll();
+    },
     getSummary() {
       const workouts = this.getAll();
       const latest = workouts[0] ?? null;
       return {
         totalWorkouts: workouts.length,
         latestWorkoutId: latest?.id ?? null,
-        latestWorkoutDate: latest?.workoutDate ?? null,
-        totalSets: workouts.reduce((sum, workout) => sum + (workout.totalSets ?? 0), 0),
-        totalVolume: workouts.reduce((sum, workout) => sum + (workout.totalVolume ?? 0), 0)
+        latestWorkoutDate: latest?.startedAt ?? null,
+        totalSets: workouts.reduce((sum, workout) => sum + (workout.sets?.length ?? 0), 0),
+        totalVolume: 0,
       };
-    }
+    },
   };
 }

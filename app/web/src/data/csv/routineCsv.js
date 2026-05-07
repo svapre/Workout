@@ -1,4 +1,5 @@
 import { createId } from "../../core/uid.js";
+import { mapTrackingType } from "../schemaMigration.js";
 import { parseCsv, toCsv } from "./csv.js";
 
 const ROUTINE_COLUMNS = [
@@ -6,12 +7,13 @@ const ROUTINE_COLUMNS = [
   "exercise_order",
   "exercise_name",
   "exercise_slug",
-  "mode",
-  "target_sets",
-  "target_reps",
-  "target_duration_sec",
-  "target_weight_kg",
-  "rest_sec",
+  "tracking_type",
+  "sets",
+  "reps",
+  "duration_seconds",
+  "weight_kg",
+  "resistance",
+  "rest_seconds",
   "notes",
 ];
 
@@ -42,19 +44,23 @@ function ensureUniqueName(baseName, existingNames) {
 }
 
 export function exportRoutinesToCsv(routines) {
-  const rows = routines.flatMap((routine) => routine.exercises.map((exercise, index) => ({
+  const rows = routines.flatMap((routine) => {
+    const entries = routine.entries || routine.exercises || [];
+    return entries.map((exercise, index) => ({
       routine_name: routine.name,
       exercise_order: index + 1,
-      exercise_name: exercise.name,
+      exercise_name: exercise.name ?? "",
       exercise_slug: exercise.exerciseSlug ?? "",
-      mode: exercise.mode,
-      target_sets: exercise.targetSets ?? "",
-    target_reps: exercise.targetReps ?? "",
-    target_duration_sec: exercise.targetDurationSec ?? "",
-    target_weight_kg: exercise.targetWeightKg ?? "",
-    rest_sec: exercise.restSec ?? "",
-    notes: exercise.notes ?? "",
-  })));
+      tracking_type: mapTrackingType(exercise.trackingType ?? exercise.mode ?? "reps"),
+      sets: exercise.sets ?? exercise.targetSets ?? "",
+      reps: exercise.reps ?? exercise.targetReps ?? "",
+      duration_seconds: exercise.durationSeconds ?? exercise.targetDurationSec ?? "",
+      weight_kg: exercise.weight ?? exercise.targetWeightKg ?? "",
+      resistance: exercise.resistance ?? "",
+      rest_seconds: exercise.restSeconds ?? exercise.restSec ?? "",
+      notes: exercise.notes ?? "",
+    }));
+  });
 
   return {
     csv: toCsv(rows, ROUTINE_COLUMNS),
@@ -86,27 +92,34 @@ export function importRoutinesFromCsv(csvText, existingNames) {
     const now = new Date().toISOString();
     const exercises = groupRows
       .sort((left, right) => Number(left.exercise_order || 0) - Number(right.exercise_order || 0))
-      .map((row, index) => ({
-        id: createId("exercise"),
-        order: index + 1,
-        name: row.exercise_name?.trim() || `Exercise ${index + 1}`,
-        exerciseSlug: row.exercise_slug?.trim() || "",
-        mode: row.mode?.trim() || "reps-only",
-        targetSets: toNumberOrNull(row.target_sets),
-        targetReps: toNumberOrNull(row.target_reps),
-        targetDurationSec: toNumberOrNull(row.target_duration_sec),
-        targetWeightKg: toNumberOrNull(row.target_weight_kg),
-        restSec: toNumberOrNull(row.rest_sec),
-        notes: row.notes?.trim() || "",
-      }));
+      .map((row, index) => {
+        const modeRaw = row.tracking_type?.trim() || row.mode?.trim() || "reps-only";
+        return {
+          id: createId("exercise"),
+          order: index + 1,
+          name: row.exercise_name?.trim() || `Exercise ${index + 1}`,
+          exerciseSlug: row.exercise_slug?.trim() || "",
+          trackingType: mapTrackingType(modeRaw),
+          sets: toNumberOrNull(row.sets ?? row.target_sets),
+          reps: toNumberOrNull(row.reps ?? row.target_reps),
+          durationSeconds: toNumberOrNull(row.duration_seconds ?? row.target_duration_sec),
+          weight: toNumberOrNull(row.weight_kg ?? row.target_weight_kg),
+          resistance: row.resistance?.trim() || null,
+          restSeconds: toNumberOrNull(row.rest_seconds ?? row.rest_sec),
+          notes: row.notes?.trim() || "",
+        };
+      });
 
     routines.push({
       id: createId("routine"),
       name,
+      description: "",
       notes: "",
+      isCustom: true,
+      difficultyScore: 1,
       createdAt: now,
       updatedAt: now,
-      exercises,
+      entries: exercises,
     });
   });
 

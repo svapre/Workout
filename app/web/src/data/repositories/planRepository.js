@@ -1,21 +1,26 @@
-export function createPlanRepository(localStore, seedFactory) {
+import { migrateActivePlan, migrateBlueprint } from "../schemaMigration.js";
+
+export function createPlanRepository(localStore, seedFactory, collectionKey = "plans") {
   const seeded = localStore.load();
-  let plans = Array.isArray(seeded?.plans) && seeded.plans.length
-    ? seeded.plans
-    : seedFactory ? seedFactory() : [];
+  const isActive = collectionKey === "active_plans";
+  let items = Array.isArray(seeded?.[collectionKey]) && seeded[collectionKey].length
+    ? seeded[collectionKey].map((p) => (isActive ? migrateActivePlan(p) : migrateBlueprint(p)))
+    : seedFactory
+      ? seedFactory().map((p) => (isActive ? migrateActivePlan(p) : migrateBlueprint(p)))
+      : [];
 
   persist();
 
   function persist() {
-    localStore.save({ plans });
+    localStore.save({ [collectionKey]: items });
   }
 
   return {
     list() {
-      return structuredClone(plans);
+      return structuredClone(items);
     },
-    replaceAll(nextPlans) {
-      plans = structuredClone(nextPlans);
+    replaceAll(nextItems) {
+      items = structuredClone(nextItems).map((p) => (isActive ? migrateActivePlan(p) : migrateBlueprint(p)));
       persist();
     },
   };

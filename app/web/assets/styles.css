@@ -800,6 +800,100 @@ details.exercise-card[open] > .exercise-card__top::after {
   }
 }
 
+/* Responsive Utilities */
+.global-overview {
+  display: flex;
+  gap: 32px;
+  margin-bottom: 48px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(143, 168, 210, 0.1);
+}
+
+.global-overview__item {
+  flex: 1;
+  min-width: 120px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.player-hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mobile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 12px 12px 24px;
+  }
+
+  .global-overview {
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .global-overview__item {
+    min-width: 40%;
+  }
+
+  .global-overview__divider {
+    display: none;
+  }
+
+  .hero-actions button {
+    width: 100%;
+  }
+
+  h1 { font-size: 2rem !important; }
+  h2 { font-size: 1.5rem !important; }
+  h3 { font-size: 1.2rem !important; }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .player-hud {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .player-hud button {
+    width: 100%;
+  }
+}
+
+/* Immersive Workout Mode */
+body.workout-active {
+  padding: 0;
+  overflow: hidden;
+}
+body.workout-active .nav,
+body.workout-active .hero,
+body.workout-active .status-banner {
+  display: none !important;
+}
+body.workout-active .app-shell {
+  max-width: 100%;
+}
+body.workout-active .page {
+  margin-top: 0;
+}
+
 @media (max-width: 720px) {
   body {
     padding: 14px 12px 28px;
@@ -862,4 +956,9 @@ details.exercise-card[open] > .exercise-card__top::after {
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+.picker-item:hover {
+  background: rgba(79, 209, 197, 0.1) !important;
+  transform: translateX(4px);
 }

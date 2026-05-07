@@ -4,12 +4,12 @@ import { createSeedExerciseCatalog } from "./data/defaultExerciseCatalog.js";
 import { createSeedRoutines, createSeedPlans } from "./data/defaults.js";
 import { createSeedWorkoutHistory } from "./data/defaultWorkoutHistory.js";
 import { parseExerciseImportJson, parseTrainingPlanImport } from "./data/import/trainingPlanImport.js";
+import { createBodyMapRepository, createSeedBodyMap } from "./data/repositories/bodyMapRepository.js";
 import { createExerciseRepository } from "./data/repositories/exerciseRepository.js";
 import { createRoutineRepository } from "./data/repositories/routineRepository.js";
 import { createWorkoutRepository } from "./data/repositories/workoutRepository.js";
 import { createPlanRepository } from "./data/repositories/planRepository.js";
 import { createLocalStore } from "./data/storage/localStore.js";
-import { renderDashboardView } from "./features/dashboard/dashboardView.js";
 import { renderExerciseView } from "./features/exercises/exerciseView.js";
 import { createExerciseService } from "./features/exercises/exerciseService.js";
 import { renderRoutineView } from "./features/routines/routineView.js";
@@ -17,10 +17,12 @@ import { createRoutineService } from "./features/routines/routineService.js";
 import { createWorkoutService } from "./features/workouts/workoutService.js";
 import { createPlanService } from "./features/plans/planService.js";
 import { renderWorkoutView } from "./features/workouts/workoutView.js";
-import { renderPlansView } from "./features/plans/plansView.js?v=3";
+import { renderPlansView } from "./features/plans/plansView.js?v=10";
 import { renderActivePlansView } from "./features/activePlans/activePlansView.js";
 import { createActivePlanService } from "./features/activePlans/activePlanService.js";
 import { renderShell } from "./ui/shell.js";
+import { renderActivePlanDetailView } from "./features/activePlans/activePlanDetailView.js";
+import { renderWorkoutPlayerView } from "./features/workoutPlayer/workoutPlayerView.js";
 
 function normalizeSelectedId(items, selectedId) {
   if (selectedId === null || selectedId === undefined) {
@@ -38,18 +40,23 @@ export function createApp(root) {
   const exerciseStore = createLocalStore("workout-app.exercises.v1");
   const exerciseRepository = createExerciseRepository(exerciseStore, createSeedExerciseCatalog);
   const exerciseService = createExerciseService(exerciseRepository);
-  const routineRepository = createRoutineRepository(localStore, createSeedRoutines);
+  const bodyMapStore = createLocalStore("workout-app.bodymap.v1");
+  const bodyMapRepository = createBodyMapRepository(bodyMapStore, createSeedBodyMap);
+  void bodyMapRepository.getAll();
+  const routineRepository = createRoutineRepository(localStore, createSeedRoutines, {
+    getExerciseCatalog: () => exerciseRepository.list(),
+  });
   const routineService = createRoutineService(routineRepository);
   const workoutStore = createLocalStore("workout-app.workouts.v1");
   const workoutRepository = createWorkoutRepository(workoutStore, createSeedWorkoutHistory);
   const workoutService = createWorkoutService(workoutRepository);
   const planStore = createLocalStore("workout-app.plans.v1");
-  const planRepository = createPlanRepository(planStore, createSeedPlans);
-  const planService = createPlanService(planRepository);
+  const planRepository = createPlanRepository(planStore, createSeedPlans, "plan_blueprints");
   const activePlanStore = createLocalStore("workout-app.activePlans.v1");
-  const activePlanRepository = createPlanRepository(activePlanStore, () => []);
+  const activePlanRepository = createPlanRepository(activePlanStore, () => [], "active_plans");
+  const planService = createPlanService(planRepository, activePlanRepository);
   const activePlanService = createActivePlanService(activePlanRepository);
-  const router = createRouter(["routines", "exercises", "workouts", "dashboard", "plans", "active-plans"], "dashboard");
+  const router = createRouter(["routines", "exercises", "workouts", "plans", "active-plans", "active-plan", "workout-player"], "active-plans");
 
   const initialExercises = exerciseService.getAll();
   const initialRoutines = routineService.getAll();
@@ -63,30 +70,36 @@ export function createApp(root) {
     selectedRoutineId: null,
     workouts: initialWorkouts,
     selectedWorkoutId: initialWorkouts[0]?.id ?? null,
-    plans: planService.getAll(),
+    plans: planService.getAllBlueprints(),
     activePlans: activePlanService.getAll(),
-    archivedPlans: createLocalStore("workout-app.archivedPlans.v1").list() || [],
+    archivedPlans: createLocalStore("workout-app.archivedPlans.v1").load() || [],
     selectedPlanId: null,
     selectedActivePlanId: null,
     planEditMode: false,
+    editingStageId: null,
+    draftBlueprint: null,
+    stageDraft: null,
+    draftRoutine: null,
     expandedExerciseIds: new Set(),
   });
 
-  // Auto-inject The Mind Illuminated plan if missing
-  const currentPlans = planService.getAll();
-  const seedPlans = createSeedPlans();
-  if (!currentPlans.some(p => p.name === seedPlans[0].name)) {
-    seedPlans.forEach(seed => {
-      const p = planService.createPlan();
-      planService.updatePlan(p.id, {
-        name: seed.name,
-        description: seed.description,
-        isActive: seed.isActive,
-        goals: seed.goals,
-        stages: seed.stages
-      });
+  // Master Seed Injection Logic
+  const currentPlans = planService.getAllBlueprints();
+  const masterPlanId = "plan_master_rehab_strength";
+  
+  if (!currentPlans.some(p => p.id === masterPlanId)) {
+    console.log("Master Seed missing. Re-injecting strict database cascade...");
+    
+    // Clear potentially corrupted data
+    exerciseRepository.replaceAll(createSeedExerciseCatalog());
+    routineRepository.replaceAll(createSeedRoutines());
+    planRepository.replaceAll(createSeedPlans());
+    
+    store.setState({ 
+      exercises: exerciseService.getAll(),
+      routines: routineService.getAll(),
+      plans: planService.getAllBlueprints()
     });
-    store.setState({ plans: planService.getAll() });
   }
 
   const actions = {
@@ -105,7 +118,11 @@ export function createApp(root) {
       });
     },
     selectRoutine(routineId) {
-      store.setState({ selectedRoutineId: routineId });
+      const routine = store.getState().routines.find(r => r.id === routineId);
+      store.setState({ 
+        selectedRoutineId: routineId,
+        draftRoutine: routine ? JSON.parse(JSON.stringify(routine)) : null
+      });
     },
     selectExercise(exerciseId) {
       store.setState({ selectedExerciseId: exerciseId });
@@ -114,19 +131,87 @@ export function createApp(root) {
       store.setState({ selectedWorkoutId: workoutId });
     },
     selectPlan(planId) {
-      store.setState({ selectedPlanId: planId, planEditMode: false });
+      const plan = store.getState().plans.find(p => p.id === planId);
+      store.setState({ 
+        selectedPlanId: planId, 
+        planEditMode: false, 
+        editingStageId: null,
+        draftBlueprint: plan ? JSON.parse(JSON.stringify(plan)) : null
+      });
+    },
+    setEditingStageId(stageId) {
+      const blueprint = store.getState().draftBlueprint;
+      let stageDraft = null;
+      if (blueprint && stageId) {
+        const stage = blueprint.stages.find(s => s.id === stageId);
+        if (stage) {
+          stageDraft = JSON.parse(JSON.stringify(stage));
+          // DATA SANITIZATION: Strip residual targetValue if exercise is missing (Legacy/Dirty data)
+          if (stageDraft.milestone?.type === "exercise_target" && !stageDraft.milestone.exerciseId) {
+            stageDraft.milestone.target = null;
+          }
+        }
+      }
+      store.setState({ editingStageId: stageId, stageDraft });
+    },
+    updateStageDraft(patch) {
+      const draft = store.getState().stageDraft;
+      if (draft) {
+        store.setState({ stageDraft: { ...draft, ...patch } });
+      }
+    },
+    commitStageDraft() {
+      const { draftBlueprint, stageDraft } = store.getState();
+      if (draftBlueprint && stageDraft) {
+        const stages = draftBlueprint.stages.map(s => 
+          s.id === stageDraft.id ? stageDraft : s
+        );
+        store.setState({ 
+          draftBlueprint: { ...draftBlueprint, stages },
+          stageDraft: null,
+          editingStageId: null
+        });
+      }
     },
     togglePlanEditMode(mode) {
-      store.setState({ planEditMode: mode ?? !store.getState().planEditMode });
+      const isEnteringEdit = mode ?? !store.getState().planEditMode;
+      if (isEnteringEdit && !store.getState().draftBlueprint) {
+        const plan = store.getState().plans.find(p => p.id === store.getState().selectedPlanId);
+        if (plan) {
+          store.setState({ draftBlueprint: JSON.parse(JSON.stringify(plan)) });
+        }
+      }
+      store.setState({ planEditMode: isEnteringEdit });
     },
-    createPlan() {
-      const plan = planService.createPlan();
-      syncCollections({ plans: planService.getAll(), selectedPlanId: plan.id, notice: "Created a new plan." });
+    createBlueprint() {
+      const plan = planService.createBlueprint();
+      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: plan.id, notice: "Created a new blueprint." });
       store.setState({ planEditMode: true });
     },
-    updatePlan(planId, patch) {
-      planService.updatePlan(planId, patch);
-      syncCollections({ plans: planService.getAll() });
+    updateBlueprint(patch) {
+      const draft = store.getState().draftBlueprint;
+      if (draft) {
+        store.setState({ draftBlueprint: { ...draft, ...patch } });
+      }
+    },
+    saveBlueprint() {
+      const draft = store.getState().draftBlueprint;
+      if (draft) {
+        planService.updateBlueprint(draft.id, draft);
+        syncCollections({ plans: planService.getAllBlueprints(), notice: "Blueprint saved successfully." });
+        store.setState({ planEditMode: false });
+      }
+    },
+    instantiatePlan(planId, customName) {
+      const success = planService.instantiatePlan(planId, customName);
+      if (success) {
+        syncCollections({
+          activePlans: activePlanService.getAll(),
+          notice: "Plan started! Redirecting to dashboard...",
+        });
+        return true;
+      }
+      return false;
     },
     activatePlan(planId) {
       const plan = store.getState().plans.find(p => p.id === planId);
@@ -138,9 +223,9 @@ export function createApp(root) {
         });
       }
     },
-    deletePlan(planId) {
-      planService.deletePlan(planId);
-      syncCollections({ plans: planService.getAll(), selectedPlanId: null, notice: "Deleted plan." });
+    deleteBlueprint(planId) {
+      planService.deleteBlueprint(planId);
+      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: null, notice: "Deleted blueprint." });
       store.setState({ planEditMode: false });
     },
     selectActivePlan(planId) {
@@ -149,6 +234,14 @@ export function createApp(root) {
     updateActivePlan(planId, patch) {
       activePlanService.updateActivePlan(planId, patch);
       syncCollections({ activePlans: activePlanService.getAll() });
+    },
+    recordCompletedSession({ session, activePlanId, planPatch }) {
+      workoutService.appendSession(session);
+      activePlanService.updateActivePlan(activePlanId, planPatch);
+      syncCollections({
+        workouts: workoutService.getAll(),
+        activePlans: activePlanService.getAll(),
+      });
     },
     deleteActivePlan(planId) {
       activePlanService.deleteActivePlan(planId);
@@ -160,11 +253,11 @@ export function createApp(root) {
       if (plan) {
         const archiveStore = createLocalStore("workout-app.archivedPlans.v1");
         const archived = { ...plan, completedAt: new Date().toISOString() };
-        archiveStore.replaceAll([...(archiveStore.list() || []), archived]);
+        archiveStore.save([...(archiveStore.load() || []), archived]);
         activePlanService.deleteActivePlan(planId);
         syncCollections({ 
           activePlans: activePlanService.getAll(), 
-          archivedPlans: archiveStore.list(),
+          archivedPlans: archiveStore.load(),
           notice: `Congratulations! "${plan.name}" has been archived.` 
         });
       }
@@ -185,39 +278,114 @@ export function createApp(root) {
         notice: `Deleted "${deleted.name}".`,
       });
     },
-    updateRoutine(routineId, patch) {
-      routineService.updateRoutine(routineId, patch);
-      syncCollections({ routines: routineService.getAll() });
+    updateRoutine(patch) {
+      const draft = store.getState().draftRoutine;
+      if (draft) {
+        store.setState({ draftRoutine: { ...draft, ...patch } });
+      }
     },
-    addExercise(routineId) {
-      routineService.addExercise(routineId);
-      syncCollections({
-        routines: routineService.getAll(),
-        selectedRoutineId: routineId,
-        notice: "Added a new exercise block.",
-      });
+    saveRoutine() {
+      const draft = store.getState().draftRoutine;
+      if (draft) {
+        const sourceEntries = draft.entries || draft.exercises || [];
+        const entries = sourceEntries.map((ex) => {
+          const catalogEntry = store.getState().exercises.find((e) => e.id === ex.exerciseId);
+          const type = catalogEntry?.trackingType || "reps";
+          const clean = {
+            id: ex.id,
+            exerciseId: ex.exerciseId,
+            order: ex.order,
+            notes: ex.notes,
+            sets: ex.sets,
+            resistance: ex.resistance ?? null,
+            restSeconds: ex.restSeconds,
+          };
+          if (type === "reps") {
+            clean.reps = ex.reps;
+            clean.durationSeconds = null;
+            clean.weight = null;
+          } else if (type === "duration") {
+            clean.durationSeconds = ex.durationSeconds;
+            clean.reps = null;
+            clean.weight = null;
+          } else if (type === "weight") {
+            clean.reps = ex.reps;
+            clean.weight = ex.weight;
+            clean.durationSeconds = null;
+          } else {
+            clean.reps = ex.reps;
+            clean.durationSeconds = ex.durationSeconds;
+            clean.weight = ex.weight;
+            clean.resistance = ex.resistance ?? null;
+          }
+          return clean;
+        });
+
+        const cleanedRoutine = { ...draft, entries, exercises: undefined };
+        routineService.updateRoutine(cleanedRoutine.id, cleanedRoutine);
+        syncCollections({ routines: routineService.getAll(), notice: "Routine saved successfully." });
+        store.setState({ selectedRoutineId: null, draftRoutine: null });
+      }
     },
-    updateExercise(routineId, exerciseId, patch) {
-      routineService.updateExercise(routineId, exerciseId, patch);
-      syncCollections({
-        routines: routineService.getAll(),
-        selectedRoutineId: routineId,
-      });
+    addExercise(exerciseId) {
+      const draft = store.getState().draftRoutine;
+      if (draft && exerciseId) {
+        const entries = draft.entries || draft.exercises || [];
+        const newInstance = {
+          id: `inst_${Date.now()}`,
+          exerciseId,
+          order: entries.length + 1,
+          sets: 3,
+          reps: 10,
+          durationSeconds: null,
+          weight: null,
+          resistance: null,
+          restSeconds: 45,
+          notes: "",
+        };
+        store.setState({
+          draftRoutine: { ...draft, entries: [...entries, newInstance], exercises: undefined },
+          notice: "Added exercise to draft.",
+        });
+      }
     },
-    deleteExercise(routineId, exerciseId) {
-      routineService.deleteExercise(routineId, exerciseId);
-      syncCollections({
-        routines: routineService.getAll(),
-        selectedRoutineId: routineId,
-        notice: "Removed exercise from routine.",
-      });
+    updateExercise(exerciseInstanceId, patch) {
+      const draft = store.getState().draftRoutine;
+      if (draft) {
+        const entries = draft.entries || draft.exercises || [];
+        const next = entries.map((ex) =>
+          ex.id === exerciseInstanceId ? { ...ex, ...patch } : ex,
+        );
+        store.setState({ draftRoutine: { ...draft, entries: next, exercises: undefined } });
+      }
     },
-    moveExercise(routineId, exerciseId, direction) {
-      routineService.moveExercise(routineId, exerciseId, direction);
-      syncCollections({
-        routines: routineService.getAll(),
-        selectedRoutineId: routineId,
-      });
+    deleteExercise(exerciseInstanceId) {
+      const draft = store.getState().draftRoutine;
+      if (draft) {
+        const entries = draft.entries || draft.exercises || [];
+        const next = entries
+          .filter((ex) => ex.id !== exerciseInstanceId)
+          .map((ex, idx) => ({ ...ex, order: idx + 1 }));
+        store.setState({
+          draftRoutine: { ...draft, entries: next, exercises: undefined },
+          notice: "Removed exercise from draft.",
+        });
+      }
+    },
+    moveExercise(exerciseInstanceId, direction) {
+      const draft = store.getState().draftRoutine;
+      if (draft) {
+        const entries = draft.entries || draft.exercises || [];
+        const index = entries.findIndex((ex) => ex.id === exerciseInstanceId);
+        if (index === -1) return;
+        const targetIndex = direction === "up" ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= entries.length) return;
+
+        const next = [...entries];
+        [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+        const reordered = next.map((ex, idx) => ({ ...ex, order: idx + 1 }));
+        store.setState({ draftRoutine: { ...draft, entries: reordered, exercises: undefined } });
+      }
     },
     toggleExerciseExpansion(exerciseId, isExpanded) {
       const currentExpanded = store.getState().expandedExerciseIds;
@@ -241,7 +409,7 @@ export function createApp(root) {
         const routineSummary = routineService.importPrepared(parsed.routines);
         const planSummary = planService.importPrepared([parsed]);
         syncCollections({
-          plans: planService.getAll(),
+          plans: planService.getAllBlueprints(),
           selectedPlanId: planSummary.firstPlanId ?? store.getState().selectedPlanId,
           exercises: exerciseService.getAll(),
           selectedExerciseId: exerciseSummary.firstExerciseId ?? store.getState().selectedExerciseId,
@@ -306,6 +474,30 @@ export function createApp(root) {
       URL.revokeObjectURL(url);
       store.setState({ notice: `Exported ${payload.rowCount} exercise reference${payload.rowCount === 1 ? "" : "s"} to ${payload.fileName}.` });
     },
+    importFullPlan(data) {
+      const planId = planService.importFullPlan(data, routineService, exerciseService.getAll());
+      syncCollections({
+        plans: planService.getAllBlueprints(),
+        routines: routineService.getAll(),
+        selectedPlanId: planId,
+        notice: "Full plan imported successfully.",
+      });
+    },
+    exportFullPlan(planId) {
+      const plan = planService.getBlueprint(planId);
+      if (!plan) return;
+      const json = planService.exportFullPlan(planId, routineService);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${plan.name.toLowerCase().replace(/\s+/g, '-')}-blueprint.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      store.setState({ notice: `Exported "${plan.name}" blueprint successfully.` });
+    },
   };
 
   function syncCollections({
@@ -317,6 +509,8 @@ export function createApp(root) {
     selectedPlanId,
     activePlans,
     selectedActivePlanId,
+    workouts,
+    selectedWorkoutId,
     archivedPlans,
     notice,
   } = {}) {
@@ -338,6 +532,12 @@ export function createApp(root) {
     const nextActivePlanIdCandidate = selectedActivePlanId !== undefined ? selectedActivePlanId : store.getState().selectedActivePlanId;
     const nextActivePlanId = nextActivePlans.some(p => p.id === nextActivePlanIdCandidate) ? nextActivePlanIdCandidate : null;
 
+    const nextWorkouts = workouts ?? store.getState().workouts;
+    const nextWorkoutId = normalizeSelectedId(
+      nextWorkouts,
+      selectedWorkoutId ?? store.getState().selectedWorkoutId,
+    );
+
     store.setState({
       exercises: nextExercises,
       selectedExerciseId: nextExerciseId,
@@ -347,6 +547,8 @@ export function createApp(root) {
       selectedPlanId: nextPlanId,
       activePlans: nextActivePlans,
       selectedActivePlanId: nextActivePlanId,
+      workouts: nextWorkouts,
+      selectedWorkoutId: nextWorkoutId,
       archivedPlans: archivedPlans ?? store.getState().archivedPlans,
       notice: notice ?? store.getState().notice,
     });
@@ -366,11 +568,6 @@ export function createApp(root) {
       return;
     }
 
-    if (state.route === "dashboard") {
-      renderDashboardView(outlet, { state, actions });
-      return;
-    }
-
     if (state.route === "plans") {
       renderPlansView(outlet, { state, actions });
       return;
@@ -378,6 +575,16 @@ export function createApp(root) {
 
     if (state.route === "active-plans") {
       renderActivePlansView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("active-plan/")) {
+      renderActivePlanDetailView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("workout-player/")) {
+      renderWorkoutPlayerView(outlet, { state, actions });
       return;
     }
 
@@ -389,6 +596,8 @@ export function createApp(root) {
   router.subscribe((route) => {
     store.setState({ route });
   });
+
+  window.appActions = actions;
 
   return {
     mount() {

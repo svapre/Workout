@@ -1,109 +1,81 @@
-import { createId } from "../core/uid.js";
-
-function buildExercise(config, order) {
-  return {
-    id: createId("exercise"),
-    order,
-    name: config.name,
-    exerciseSlug: config.exerciseSlug ?? "",
-    mode: config.mode,
-    targetSets: config.targetSets,
-    targetReps: config.targetReps,
-    targetDurationSec: config.targetDurationSec,
-    targetWeightKg: config.targetWeightKg,
-    restSec: config.restSec,
-    notes: config.notes,
-  };
-}
+/**
+ * Master Seed Data Defaults
+ *
+ * Injects strictly linked Routines and Plans.
+ */
 
 export function createSeedRoutines() {
   return [
     {
-      id: createId("routine"),
-      name: "Stage 1 Rehab",
-      notes: "Foundational corrective work with simple, repeatable movements.",
+      id: "rt_rehab_core",
+      name: "Posture & Core Rehab",
+      description: "Focus on control and stability.",
+      notes: "Focus on control and stability.",
+      isCustom: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      exercises: [
-        buildExercise(
-          {
-            name: "Surya Namaskar",
-            exerciseSlug: "surya-namaskar",
-            mode: "reps+time",
-            targetSets: 3,
-            targetReps: 12,
-            targetDurationSec: 300,
-            targetWeightKg: 0,
-            restSec: 30,
-            notes: "Smooth tempo, no rushed transitions.",
-          },
-          1,
-        ),
-        buildExercise(
-          {
-            name: "Bird Dog",
-            exerciseSlug: "bird-dog",
-            mode: "reps+time",
-            targetSets: 3,
-            targetReps: 10,
-            targetDurationSec: 60,
-            targetWeightKg: 0,
-            restSec: 30,
-            notes: "Count both sides together for each set.",
-          },
-          2,
-        ),
-        buildExercise(
-          {
-            name: "Glute Bridge",
-            exerciseSlug: "glute-bridge",
-            mode: "reps-only",
-            targetSets: 3,
-            targetReps: 15,
-            targetDurationSec: null,
-            targetWeightKg: 0,
-            restSec: 45,
-            notes: "Pause briefly at the top.",
-          },
-          3,
-        ),
+      difficultyScore: 1,
+      entries: [
+        {
+          id: "inst_1",
+          exerciseId: "ex_bird_dog",
+          order: 1,
+          sets: 3,
+          reps: null,
+          durationSeconds: 60,
+          weight: null,
+          resistance: null,
+          restSeconds: 30,
+          notes: "Focus on anti-rotation.",
+        },
+        {
+          id: "inst_2",
+          exerciseId: "ex_glute_bridge",
+          order: 2,
+          sets: 3,
+          reps: 15,
+          durationSeconds: null,
+          weight: null,
+          resistance: null,
+          restSeconds: 30,
+          notes: "Drive through heels.",
+        },
       ],
     },
     {
-      id: createId("routine"),
-      name: "Push-up Base",
-      notes: "Simple upper body builder with room for future progress tracking.",
+      id: "rt_upper_base",
+      name: "Upper Body Base",
+      description: "Compound pushing and pulling.",
+      notes: "Compound pushing and pulling.",
+      isCustom: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      exercises: [
-        buildExercise(
-          {
-            name: "Incline Push-up",
-            exerciseSlug: "incline-push-up",
-            mode: "reps-only",
-            targetSets: 4,
-            targetReps: 10,
-            targetDurationSec: null,
-            targetWeightKg: 0,
-            restSec: 60,
-            notes: "Choose a height that keeps reps crisp.",
-          },
-          1,
-        ),
-        buildExercise(
-          {
-            name: "Band Row",
-            exerciseSlug: "band-row",
-            mode: "reps-only",
-            targetSets: 4,
-            targetReps: 12,
-            targetDurationSec: null,
-            targetWeightKg: 0,
-            restSec: 45,
-            notes: "Pair with push-ups for balanced volume.",
-          },
-          2,
-        ),
+      difficultyScore: 1,
+      entries: [
+        {
+          id: "inst_3",
+          exerciseId: "ex_pushup",
+          order: 1,
+          sets: 3,
+          reps: 10,
+          durationSeconds: null,
+          weight: null,
+          resistance: null,
+          restSeconds: 60,
+          notes: "Strict form, no sagging.",
+        },
+        {
+          id: "inst_4",
+          exerciseId: "ex_band_row",
+          order: 2,
+          sets: 3,
+          reps: 15,
+          durationSeconds: null,
+          weight: null,
+          resistance: null,
+          restSeconds: 45,
+          notes: "Squeeze shoulder blades.",
+        },
       ],
     },
   ];
@@ -112,46 +84,58 @@ export function createSeedRoutines() {
 export function createSeedPlans() {
   return [
     {
-      id: createId("plan"),
-      name: "The Mind Illuminated (Meditation)",
-      description: "A 10-stage guide to integrating mindfulness into your daily life. Culadasa's progressive approach to meditation, focusing on overcoming specific obstacles at each stage.",
-      isActive: true,
-      goals: [
-        {
-          id: createId("goal"),
-          title: "Daily Sit",
-          target: "45 mins",
-          timeframe: "End of Month 1"
-        },
-        {
-          id: createId("goal"),
-          title: "Continuous Attention",
-          target: "10 mins uninterrupted",
-          timeframe: "Month 3"
-        }
-      ],
+      id: "plan_master_rehab_strength",
+      version: "1.0",
+      name: "Phase 1: Posture & Base Strength",
+      description:
+        "Build core stability for long sitting hours and baseline pushing strength.",
+      goal: "",
+      theme: {
+        color: "#4FD1C5",
+        icon: "🧘",
+        code: "RHB",
+      },
+      createdAt: new Date().toISOString(),
       stages: [
         {
-          id: createId("stage"),
-          name: "Stage 1: Establishing a Practice",
-          condition: "You can sit consistently every day for your target duration without skipping."
+          id: "stg_1_core",
+          name: "Stage 1: Core Activation",
+          predecessorStageId: null,
+          transitionRule: "prompt_user",
+          schedule: [
+            { type: "routine", routineId: "rt_rehab_core" },
+            { type: "routine", routineId: "rt_rehab_core" },
+          ],
+          milestone: {
+            description: "Hold a perfect Bird Dog for 60 seconds per side.",
+            type: "exercise_target",
+            target: 60,
+            requiresContinuous: false,
+            exerciseId: "ex_bird_dog",
+            metric: null,
+            onFailure: { action: "none", targetStageId: null },
+          },
         },
         {
-          id: createId("stage"),
-          name: "Stage 2: Overcoming Mind-Wandering",
-          condition: "You notice mind-wandering quickly and can return to the breath. Periods of mind-wandering are shorter than periods of sustained attention."
+          id: "stg_2_strength",
+          name: "Stage 2: Integration",
+          predecessorStageId: null,
+          transitionRule: "prompt_user",
+          schedule: [
+            { type: "routine", routineId: "rt_upper_base" },
+            { type: "routine", routineId: "rt_rehab_core" },
+          ],
+          milestone: {
+            description: "Perform 20 unbroken Push-ups with perfect form.",
+            type: "exercise_target",
+            target: 20,
+            requiresContinuous: false,
+            exerciseId: "ex_pushup",
+            metric: null,
+            onFailure: { action: "none", targetStageId: null },
+          },
         },
-        {
-          id: createId("stage"),
-          name: "Stage 3: Overcoming Forgetting",
-          condition: "You rarely forget the breath entirely. You can maintain attention on the breath, though it may still slip into the background."
-        },
-        {
-          id: createId("stage"),
-          name: "Stage 4: Continuous Attention",
-          condition: "Gross distractions and strong dullness are overcome. You maintain continuous, unbroken attention on the meditation object."
-        }
-      ]
-    }
+      ],
+    },
   ];
 }

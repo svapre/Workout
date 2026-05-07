@@ -1,4 +1,4 @@
-import { createId } from "../../core/uid.js";
+import { createActivePlanFromBlueprint } from "../../data/schemaMigration.js";
 
 export function createActivePlanService(repository) {
   function getAll() {
@@ -10,15 +10,19 @@ export function createActivePlanService(repository) {
   }
 
   function activatePlan(planTemplate) {
-    // Deep clone the template so it's a snapshot
-    const activePlan = JSON.parse(JSON.stringify(planTemplate));
-    activePlan.id = createId("activePlan");
-    activePlan.templateId = planTemplate.id;
-    activePlan.isActive = true; // For dashboard rendering
-    activePlan.activatedAt = new Date().toISOString();
-    
-    // Add it to repository
-    repository.replaceAll([...getAll(), activePlan]);
+    const current = getAll();
+    let finalName = planTemplate.name;
+    let suffix = 1;
+    const names = new Set(current.map((p) => p.name));
+    while (names.has(finalName)) {
+      suffix += 1;
+      finalName = `${planTemplate.name} (${suffix})`;
+    }
+    const activePlan = createActivePlanFromBlueprint(planTemplate, {
+      name: finalName,
+      blueprintId: planTemplate.id,
+    });
+    repository.replaceAll([...current, activePlan]);
     return activePlan;
   }
 
@@ -26,8 +30,8 @@ export function createActivePlanService(repository) {
     const plans = getAll();
     const index = plans.findIndex((p) => p.id === id);
     if (index === -1) return null;
-    
-    plans[index] = { ...plans[index], ...patch, updatedAt: new Date().toISOString() };
+
+    plans[index] = { ...plans[index], ...patch };
     repository.replaceAll(plans);
     return plans[index];
   }
@@ -44,14 +48,7 @@ export function createActivePlanService(repository) {
   }
 
   function toggleActivePlan(id) {
-    const plans = getAll();
-    const updated = plans.map(p => {
-      if (p.id === id) {
-        return { ...p, isActive: !p.isActive };
-      }
-      return p;
-    });
-    repository.replaceAll(updated);
+    void id;
   }
 
   return { getAll, getActivePlan, activatePlan, updateActivePlan, deleteActivePlan, toggleActivePlan };

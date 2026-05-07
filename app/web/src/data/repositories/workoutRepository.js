@@ -1,8 +1,10 @@
+import { migrateWorkoutSession } from "../schemaMigration.js";
+
 export function createWorkoutRepository(localStore, seedFactory) {
   const seeded = localStore.load();
   let workouts = Array.isArray(seeded?.workouts) && seeded.workouts.length
-    ? seeded.workouts
-    : seedFactory();
+    ? seeded.workouts.map(migrateWorkoutSession)
+    : seedFactory().map(migrateWorkoutSession);
 
   persist();
 
@@ -15,8 +17,14 @@ export function createWorkoutRepository(localStore, seedFactory) {
       return structuredClone(workouts);
     },
     replaceAll(nextWorkouts) {
-      workouts = structuredClone(nextWorkouts);
+      workouts = structuredClone(nextWorkouts).map(migrateWorkoutSession);
       persist();
-    }
+    },
+    appendSession(session) {
+      const normalized = migrateWorkoutSession(session);
+      workouts = [normalized, ...workouts];
+      persist();
+      return structuredClone(normalized);
+    },
   };
 }

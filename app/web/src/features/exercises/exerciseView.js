@@ -37,22 +37,22 @@ function renderExerciseDetail(exercise) {
       <div class="panel__header">
         <div>
           <h2 class="panel__title">${escapeHtml(exercise.name)}</h2>
-          <p class="panel__copy">${escapeHtml(exercise.category)} - ${escapeHtml(exercise.movementPattern || "general")}</p>
+          <p class="panel__copy">${escapeHtml(exercise.category)} — ${escapeHtml(exercise.trackingType || exercise.mode || "reps")} — ${escapeHtml(exercise.movementPattern || "general")}</p>
         </div>
       </div>
       <div class="panel__body stack">
         <div class="field-grid">
           <div class="field field--full">
             <label>Summary</label>
-            <div class="read-block">${escapeHtml(exercise.summary || "No summary yet.")}</div>
+            <div class="read-block">${escapeHtml(exercise.description || exercise.summary || "No summary yet.")}</div>
           </div>
           <div class="field field--full">
             <label>Why It Helps</label>
             <div class="read-block">${escapeHtml(exercise.whyItHelps || "No context yet.")}</div>
           </div>
           <div class="field field--full">
-            <label>Primary Muscles</label>
-            ${renderPills(exercise.primaryMuscles)}
+            <label>Body Targets</label>
+            ${renderPills((exercise.bodyTargets?.length ? exercise.bodyTargets : exercise.primaryMuscles) || [])}
           </div>
           <div class="field field--full">
             <label>Secondary Muscles</label>
@@ -105,9 +105,9 @@ export function renderExerciseView(container, { state, actions }) {
                     <div class="exercise-card__top" style="margin-bottom: 8px;">
                       <h3 class="exercise-card__title" style="font-size: 1.1rem; color: var(--brand);">${escapeHtml(exercise.name || "Untitled Exercise")}</h3>
                     </div>
-                    <p class="muted" style="font-size: 0.9rem; margin-bottom: 24px; flex-grow: 1;">${escapeHtml(exercise.summary ? exercise.summary.slice(0, 120) + '...' : "No summary")}</p>
+                    <p class="muted" style="font-size: 0.9rem; margin-bottom: 24px; flex-grow: 1;">${escapeHtml((exercise.description || exercise.summary || "").length > 120 ? (exercise.description || exercise.summary).slice(0, 120) + "..." : (exercise.description || exercise.summary || "No summary"))}</p>
                     <div style="font-size: 0.85rem; color: var(--soft); margin-bottom: 16px;">
-                      ${escapeHtml(exercise.category)} - ${(exercise.primaryMuscles ?? []).slice(0, 2).join(", ")}
+                      ${escapeHtml(exercise.category)} — ${(exercise.bodyTargets?.length ? exercise.bodyTargets : exercise.primaryMuscles ?? []).slice(0, 2).join(", ")}
                     </div>
                     <div style="display: flex; gap: 8px; margin-top: auto;">
                       <button class="button button--ghost" data-action="select-exercise" data-exercise-id="${exercise.id}" type="button" style="flex: 1; padding: 8px;">View Detail</button>

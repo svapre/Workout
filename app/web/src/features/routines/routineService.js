@@ -9,24 +9,23 @@ function withTimestamp(routine) {
   return { ...routine, updatedAt: new Date().toISOString() };
 }
 
-function createExercise(order) {
+function createEntry(exerciseId, order) {
   return {
-    id: createId("exercise"),
+    id: createId("exercise_instance"),
+    exerciseId,
     order,
-    name: `Exercise ${order}`,
-    exerciseSlug: "",
-    mode: "reps-only",
-    targetSets: 3,
-    targetReps: 10,
-    targetDurationSec: null,
-    targetWeightKg: 0,
-    restSec: 45,
+    sets: 3,
+    reps: 10,
+    durationSeconds: null,
+    weight: null,
+    resistance: null,
+    restSeconds: 45,
     notes: "",
   };
 }
 
-function renumberExercises(exercises) {
-  return exercises.map((exercise, index) => ({
+function renumberEntries(entries) {
+  return entries.map((exercise, index) => ({
     ...exercise,
     order: index + 1,
   }));
@@ -48,12 +47,16 @@ function uniqueCopyName(baseName, existingNames) {
 }
 
 function parseFieldValue(key, value) {
+  if (key === "resistance") {
+    return value === "" ? null : String(value);
+  }
+
   const numericFields = new Set([
-    "targetSets",
-    "targetReps",
-    "targetDurationSec",
-    "targetWeightKg",
-    "restSec",
+    "sets",
+    "reps",
+    "durationSeconds",
+    "weight",
+    "restSeconds",
     "difficultyScore",
   ]);
 
@@ -93,11 +96,13 @@ export function createRoutineService(repository) {
       const routine = {
         id: createId("routine"),
         name: routineName,
+        description: "",
         notes: "",
-        difficultyScore: 1, // 1-10
+        difficultyScore: 1,
+        isCustom: true,
         createdAt: now,
         updatedAt: now,
-        exercises: [createExercise(1)],
+        entries: [],
       };
 
       save([...current, routine]);
@@ -112,18 +117,23 @@ export function createRoutineService(repository) {
 
       const existingNames = new Set(current.map((routine) => routine.name));
       const now = new Date().toISOString();
+      const entries = source.entries || source.exercises || [];
       const routine = {
         ...structuredClone(source),
         id: createId("routine"),
         name: uniqueCopyName(source.name, existingNames),
+        description: source.description ?? source.notes ?? "",
+        notes: source.notes ?? "",
+        isCustom: true,
         createdAt: now,
         updatedAt: now,
-        exercises: source.exercises.map((exercise, index) => ({
+        entries: entries.map((exercise, index) => ({
           ...structuredClone(exercise),
           id: createId("exercise"),
           order: index + 1,
         })),
       };
+      delete routine.exercises;
 
       save([...current, routine]);
       return routine;
@@ -150,14 +160,16 @@ export function createRoutineService(repository) {
         });
       }));
     },
-    addExercise(routineId) {
+    addExercise(routineId, exerciseId) {
+      if (!exerciseId) return;
       updateRoutineCollection((routines) => routines.map((routine) => {
         if (routine.id !== routineId) {
           return routine;
         }
 
-        const exercises = [...routine.exercises, createExercise(routine.exercises.length + 1)];
-        return withTimestamp({ ...routine, exercises });
+        const entries = routine.entries || routine.exercises || [];
+        const nextEntries = [...entries, createEntry(exerciseId, entries.length + 1)];
+        return withTimestamp({ ...routine, entries: nextEntries, exercises: undefined });
       }));
     },
     updateExercise(routineId, exerciseId, patch) {
@@ -166,7 +178,8 @@ export function createRoutineService(repository) {
           return routine;
         }
 
-        const exercises = routine.exercises.map((exercise) => {
+        const entries = routine.entries || routine.exercises || [];
+        const nextEntries = entries.map((exercise) => {
           if (exercise.id !== exerciseId) {
             return exercise;
           }
@@ -177,7 +190,7 @@ export function createRoutineService(repository) {
           return { ...exercise, ...parsedPatch };
         });
 
-        return withTimestamp({ ...routine, exercises });
+        return withTimestamp({ ...routine, entries: nextEntries, exercises: undefined });
       }));
     },
     deleteExercise(routineId, exerciseId) {
@@ -186,9 +199,10 @@ export function createRoutineService(repository) {
           return routine;
         }
 
-        const remaining = routine.exercises.filter((exercise) => exercise.id !== exerciseId);
-        const exercises = renumberExercises(remaining.length ? remaining : [createExercise(1)]);
-        return withTimestamp({ ...routine, exercises });
+        const entries = routine.entries || routine.exercises || [];
+        const remaining = entries.filter((exercise) => exercise.id !== exerciseId);
+        const nextEntries = renumberEntries(remaining);
+        return withTimestamp({ ...routine, entries: nextEntries, exercises: undefined });
       }));
     },
     moveExercise(routineId, exerciseId, direction) {
@@ -197,19 +211,20 @@ export function createRoutineService(repository) {
           return routine;
         }
 
-        const index = routine.exercises.findIndex((exercise) => exercise.id === exerciseId);
+        const entries = routine.entries || routine.exercises || [];
+        const index = entries.findIndex((exercise) => exercise.id === exerciseId);
         if (index < 0) {
           return routine;
         }
 
         const targetIndex = direction === "up" ? index - 1 : index + 1;
-        if (targetIndex < 0 || targetIndex >= routine.exercises.length) {
+        if (targetIndex < 0 || targetIndex >= entries.length) {
           return routine;
         }
 
-        const exercises = [...routine.exercises];
-        [exercises[index], exercises[targetIndex]] = [exercises[targetIndex], exercises[index]];
-        return withTimestamp({ ...routine, exercises: renumberExercises(exercises) });
+        const next = [...entries];
+        [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+        return withTimestamp({ ...routine, entries: renumberEntries(next), exercises: undefined });
       }));
     },
     importFromCsv(csvText) {

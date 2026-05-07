@@ -2,7 +2,6 @@ const NAV_GROUPS = [
   {
     label: null, // primary group, no label needed
     items: [
-      { id: "dashboard", label: "Dashboard" },
       { id: "active-plans", label: "Active Plans" },
       { id: "workouts", label: "Workouts" },
     ],
@@ -10,7 +9,7 @@ const NAV_GROUPS = [
   {
     label: "Library",
     items: [
-      { id: "plans", label: "Plans" },
+      { id: "plans", label: "Plan Blueprints" },
       { id: "routines", label: "Routines" },
       { id: "exercises", label: "Exercises" },
     ],

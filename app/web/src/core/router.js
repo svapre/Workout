@@ -1,10 +1,22 @@
 export function createRouter(validRoutes, defaultRoute) {
-  const allowed = new Set(validRoutes);
+  // We'll treat validRoutes as prefixes for dynamic segments if they contain a slash or we can just use simple matching for now
   const listeners = new Set();
 
   function readRoute() {
     const hash = window.location.hash.replace(/^#\/?/, "");
-    return allowed.has(hash) ? hash : defaultRoute;
+    if (!hash) return defaultRoute;
+
+    // Check for exact matches first
+    if (validRoutes.includes(hash)) return hash;
+
+    // Check for dynamic routes like "active-plan/id"
+    const parts = hash.split('/');
+    const base = parts[0];
+    if (validRoutes.includes(base) && parts.length > 1) {
+        return hash; // Allow the full hash if the base is valid
+    }
+
+    return defaultRoute;
   }
 
   function notify() {
@@ -17,8 +29,7 @@ export function createRouter(validRoutes, defaultRoute) {
       return readRoute();
     },
     navigate(route) {
-      const nextRoute = allowed.has(route) ? route : defaultRoute;
-      window.location.hash = `#/${nextRoute}`;
+      window.location.hash = `#/${route}`;
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -29,7 +40,7 @@ export function createRouter(validRoutes, defaultRoute) {
 
       if (!window.location.hash) {
         this.navigate(defaultRoute);
-        notify();
+        // navigate will trigger hashchange which calls notify
         return;
       }
 
