@@ -12,7 +12,8 @@ export function createSeedExerciseCatalog() {
       name: "Bird Dog",
       category: "rehab",
       type: "mobility",
-      trackingType: "duration",
+      trackingType: "reps",
+      supportedTrackingModes: ["reps", "duration"],
       description:
         "A trunk stability drill where opposite arm and leg reach long while the spine stays controlled.",
       primaryMuscles: ["Core", "Glutes"],
@@ -32,6 +33,7 @@ export function createSeedExerciseCatalog() {
       category: "strength",
       type: "physical",
       trackingType: "reps",
+      supportedTrackingModes: ["reps"],
       description:
         "A supine hip extension movement that trains the glutes while keeping spinal loading relatively low.",
       primaryMuscles: ["Glutes"],
@@ -51,6 +53,7 @@ export function createSeedExerciseCatalog() {
       category: "strength",
       type: "physical",
       trackingType: "reps",
+      supportedTrackingModes: ["reps"],
       description:
         "A classic bodyweight pressing movement with a strong trunk stability component.",
       primaryMuscles: ["Chest", "Triceps"],
@@ -70,6 +73,7 @@ export function createSeedExerciseCatalog() {
       category: "strength",
       type: "physical",
       trackingType: "reps",
+      supportedTrackingModes: ["reps", "resistance"],
       description:
         "A row pattern using a resistance band for upper-back and arm work.",
       primaryMuscles: ["Lats", "Upper Back"],

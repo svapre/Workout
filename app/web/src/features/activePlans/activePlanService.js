@@ -1,4 +1,5 @@
 import { createActivePlanFromBlueprint } from "../../data/schemaMigration.js";
+import { generateUniquePlanName } from "./activePlanUtils.js";
 
 export function createActivePlanService(repository) {
   function getAll() {
@@ -11,15 +12,10 @@ export function createActivePlanService(repository) {
 
   function activatePlan(planTemplate) {
     const current = getAll();
-    let finalName = planTemplate.name;
-    let suffix = 1;
-    const names = new Set(current.map((p) => p.name));
-    while (names.has(finalName)) {
-      suffix += 1;
-      finalName = `${planTemplate.name} (${suffix})`;
-    }
+    const finalName = generateUniquePlanName(planTemplate.name, current);
+
     const activePlan = createActivePlanFromBlueprint(planTemplate, {
-      name: finalName,
+      displayName: finalName,
       blueprintId: planTemplate.id,
     });
     repository.replaceAll([...current, activePlan]);

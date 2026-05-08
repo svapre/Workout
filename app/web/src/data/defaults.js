@@ -4,6 +4,8 @@
  * Injects strictly linked Routines and Plans.
  */
 
+import { createDefaultMilestone } from "./schemaMigration.js";
+
 export function createSeedRoutines() {
   return [
     {
@@ -106,15 +108,19 @@ export function createSeedPlans() {
             { type: "routine", routineId: "rt_rehab_core" },
             { type: "routine", routineId: "rt_rehab_core" },
           ],
-          milestone: {
-            description: "Hold a perfect Bird Dog for 60 seconds per side.",
-            type: "exercise_target",
-            target: 60,
-            requiresContinuous: false,
-            exerciseId: "ex_bird_dog",
-            metric: null,
-            onFailure: { action: "none", targetStageId: null },
-          },
+          milestone: createDefaultMilestone({
+            description: "Pass the Bird Dog control test to move on.",
+            eligibility: { type: "none", target: null, requiresContinuous: false },
+            test: {
+              type: "exercise",
+              source: "stage_entry",
+              exerciseId: "ex_bird_dog",
+              metric: "duration",
+              target: 60,
+              routineId: "rt_rehab_core",
+              routineEntryId: "inst_1",
+            },
+          }),
         },
         {
           id: "stg_2_strength",
@@ -125,15 +131,19 @@ export function createSeedPlans() {
             { type: "routine", routineId: "rt_upper_base" },
             { type: "routine", routineId: "rt_rehab_core" },
           ],
-          milestone: {
-            description: "Perform 20 unbroken Push-ups with perfect form.",
-            type: "exercise_target",
-            target: 20,
-            requiresContinuous: false,
-            exerciseId: "ex_pushup",
-            metric: null,
-            onFailure: { action: "none", targetStageId: null },
-          },
+          milestone: createDefaultMilestone({
+            description: "Pass the push-up benchmark to unlock the next phase.",
+            eligibility: { type: "sessions", target: 4, requiresContinuous: false },
+            test: {
+              type: "exercise",
+              source: "stage_entry",
+              exerciseId: "ex_pushup",
+              metric: "reps",
+              target: 20,
+              routineId: "rt_upper_base",
+              routineEntryId: "inst_3",
+            },
+          }),
         },
       ],
     },

@@ -26,5 +26,18 @@ export function createWorkoutRepository(localStore, seedFactory) {
       persist();
       return structuredClone(normalized);
     },
+    updateSession(workoutId, patch) {
+      const index = workouts.findIndex((workout) => workout.id === workoutId);
+      if (index === -1) {
+        return null;
+      }
+
+      workouts[index] = migrateWorkoutSession({
+        ...workouts[index],
+        ...structuredClone(patch),
+      });
+      persist();
+      return structuredClone(workouts[index]);
+    },
   };
 }

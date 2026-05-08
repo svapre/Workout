@@ -19,6 +19,10 @@ export function createWorkoutService(repository) {
       repository.appendSession(session);
       return this.getAll();
     },
+    updateSession(workoutId, patch) {
+      repository.updateSession(workoutId, patch);
+      return this.getAll();
+    },
     getSummary() {
       const workouts = this.getAll();
       const latest = workouts[0] ?? null;

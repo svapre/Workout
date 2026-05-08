@@ -1,5 +1,10 @@
 import { createId } from "../../core/uid.js";
-import { mapTrackingType, PRIMARY_MUSCLE_NAME_TO_BODY_MAP_ID } from "../schemaMigration.js";
+import {
+  getExerciseSupportedTrackingModes,
+  mapTrackingType,
+  normalizeTrackingModes,
+  PRIMARY_MUSCLE_NAME_TO_BODY_MAP_ID,
+} from "../schemaMigration.js";
 import { parseCsv, toCsv } from "./csv.js";
 
 const EXERCISE_COLUMNS = [
@@ -9,6 +14,7 @@ const EXERCISE_COLUMNS = [
   "category",
   "type",
   "tracking_type",
+  "supported_tracking_modes",
   "equipment",
   "body_targets",
   "primary_muscles",
@@ -70,6 +76,7 @@ export function exportExerciseCatalogToCsv(exercises) {
     category: exercise.category ?? "",
     type: exercise.type ?? "",
     tracking_type: exercise.trackingType ?? mapTrackingType(exercise.mode),
+    supported_tracking_modes: getExerciseSupportedTrackingModes(exercise).join("|"),
     equipment: (exercise.equipment ?? []).join("|"),
     body_targets: (exercise.bodyTargets ?? []).join("|"),
     primary_muscles: (exercise.primaryMuscles ?? []).join("|"),
@@ -108,6 +115,10 @@ export function importExerciseCatalogFromCsv(csvText, usedSlugs) {
         category: row.category?.trim() || "strength",
         type: row.type?.trim() || "physical",
         trackingType: mapTrackingType(row.tracking_type?.trim() || row.mode?.trim() || "reps-only"),
+        supportedTrackingModes: normalizeTrackingModes(
+          row.supported_tracking_modes?.trim() || "",
+          row.tracking_type?.trim() || row.mode?.trim() || "reps-only",
+        ),
         equipment: splitList(row.equipment),
         primaryMuscles: primaryList,
         bodyTargets,

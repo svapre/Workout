@@ -5,6 +5,11 @@
  */
 
 import { confirmAction } from "../../ui/modal.js";
+import {
+  getExerciseDefaultTrackingType,
+  getExerciseSupportedTrackingModes,
+  inferRoutineEntryTrackingType,
+} from "../../data/schemaMigration.js";
 
 function formatExerciseCount(count) {
   return `${count} exercise${count === 1 ? "" : "s"}`;
@@ -18,16 +23,98 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function truncate(value, maxLength = 150) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function summarizeRoutineFocus(routine, state) {
+  const entries = routine.entries || routine.exercises || [];
+  const names = entries
+    .map((entry) => state.exercises.find((exercise) => exercise.id === entry.exerciseId)?.name)
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (names.length === 0) {
+    return "No exercises yet";
+  }
+
+  const remainder = entries.length - names.length;
+  return remainder > 0 ? `${names.join(", ")} +${remainder}` : names.join(", ");
+}
+
+function getRoutineTheme(routine) {
+  const difficulty = Number(routine.difficultyScore ?? 1);
+  if (difficulty >= 8) {
+    return { accent: "#F6AD55", icon: "HI" };
+  }
+  if (difficulty >= 5) {
+    return { accent: "#4FD1C5", icon: "RT" };
+  }
+  return { accent: "#63B3ED", icon: "EZ" };
+}
+
+function renderRoutineLibraryCard(routine, state) {
+  const theme = getRoutineTheme(routine);
+  const entries = routine.entries || routine.exercises || [];
+  const exerciseCount = entries.length;
+  const note = truncate(routine.notes || routine.description || "No routine notes yet.", 150);
+
+  return `
+    <article class="plan-card" style="--plan-color: ${theme.accent};" data-action="routine-card" data-routine-id="${routine.id}">
+      <div class="plan-card__top">
+        <div class="plan-card__icon" style="background: ${theme.accent}22; border-color: ${theme.accent}44; color: ${theme.accent}; font-size: 0.82rem; font-weight: 800;">
+          ${theme.icon}
+        </div>
+        <div class="plan-card__info">
+          <h2 class="plan-card__title">${escapeHtml(routine.name || "Untitled Routine")}</h2>
+          <p class="plan-card__subtitle">Reusable session block for one or more active plans.</p>
+        </div>
+      </div>
+
+      <div class="plan-card__label-row">
+        <span class="plan-card__tag">${escapeHtml(formatExerciseCount(exerciseCount))}</span>
+        <span class="plan-card__tag">${escapeHtml(`Difficulty ${routine.difficultyScore ?? 1}`)}</span>
+      </div>
+
+      <div class="plan-card__mission">
+        <div class="plan-card__mission-label">Routine focus</div>
+        <h3 class="plan-card__mission-title">${escapeHtml(summarizeRoutineFocus(routine, state))}</h3>
+        <p class="plan-card__mission-note">${escapeHtml(note)}</p>
+      </div>
+
+      <div class="plan-card__progress">
+        <div class="plan-card__progress-title">Readiness</div>
+        <div class="plan-card__progress-text">${escapeHtml(`${exerciseCount} exercise${exerciseCount === 1 ? "" : "s"} configured`)}</div>
+      </div>
+
+      <button
+        class="button button--primary plan-card__cta"
+        data-action="select-routine"
+        data-routine-id="${routine.id}"
+        type="button"
+        style="background: ${theme.accent}; color: #000; border: none; box-shadow: 0 10px 24px ${theme.accent}55;"
+      >
+        Edit routine
+      </button>
+    </article>
+  `;
+}
+
 function renderExerciseCard(instance, state) {
   const catalogEntry = state.exercises.find(e => e.id === instance.exerciseId);
   const name = catalogEntry?.name || "Unknown Exercise";
-  const mode = catalogEntry?.trackingType || "reps";
+  const supportedModes = getExerciseSupportedTrackingModes(catalogEntry);
+  const mode = inferRoutineEntryTrackingType(instance, catalogEntry);
 
-  // Data-Driven Input Visibility
-  const showReps = mode === 'reps' || mode === 'weight' || mode === 'resistance';
-  const showDuration = mode === 'duration' || mode === 'resistance';
-  const showWeight = mode === 'weight' || mode === 'resistance';
-  const showResistance = mode === 'resistance';
+  const showReps = mode === "reps" || mode === "weight" || (mode === "resistance" && instance.durationSeconds == null);
+  const showDuration = mode === "duration";
+  const showWeight = mode === "weight" || instance.weight != null;
+  const showResistance = mode === "resistance" || instance.resistance != null;
 
   return `
     <details class="exercise-card" data-instance-id="${instance.id}" ${state.expandedExerciseIds.has(instance.id) ? "open" : ""}>
@@ -44,6 +131,22 @@ function renderExerciseCard(instance, state) {
       </summary>
 
       <div class="field-grid">
+        ${supportedModes.length > 1 ? `
+          <div class="field">
+            <label>Tracking mode</label>
+            <select data-field="trackingMode">
+              ${supportedModes.map((trackingMode) => `
+                <option value="${trackingMode}" ${trackingMode === mode ? "selected" : ""}>${escapeHtml(trackingMode)}</option>
+              `).join("")}
+            </select>
+          </div>
+        ` : `
+          <div class="field">
+            <label>Tracking mode</label>
+            <div class="read-block">${escapeHtml(getExerciseDefaultTrackingType(catalogEntry))}</div>
+          </div>
+        `}
+
         <div class="field">
           <label>Sets</label>
           <input data-field="sets" type="number" min="0" step="1" value="${instance.sets ?? instance.targetSets ?? ""}">
@@ -123,7 +226,7 @@ function openExercisePicker(container, exercises, onSelect) {
     listContainer.innerHTML = filtered.map(ex => `
       <div class="picker-item" data-id="${ex.id}" style="padding: 12px 16px; cursor: pointer; border-radius: var(--radius-sm); margin-bottom: 4px; transition: background 0.2s;">
         <div style="font-weight: 600; color: var(--text);">${escapeHtml(ex.name)}</div>
-        <div style="font-size: 0.8rem; color: var(--soft); text-transform: uppercase;">Type: ${escapeHtml(ex.trackingType || ex.mode || "reps")}</div>
+        <div style="font-size: 0.8rem; color: var(--soft); text-transform: uppercase;">Modes: ${escapeHtml(getExerciseSupportedTrackingModes(ex).join(", "))}</div>
       </div>
     `).join('');
 
@@ -151,49 +254,64 @@ function openExercisePicker(container, exercises, onSelect) {
 function renderSelectedRoutine(routine, state) {
   const entries = routine.entries || routine.exercises || [];
   return `
-    <div style="margin-bottom: 32px;">
-      <h2 style="margin: 0; color: var(--brand); font-size: 2rem;">Routine Editor</h2>
-      <p style="color: var(--soft);">Refining Template: ${escapeHtml(routine.name || "Untitled")}</p>
-    </div>
-
-    <section class="panel" style="margin-bottom: 100px;">
-      <div class="panel__header" style="flex-wrap: wrap; gap: 20px;">
-        <div>
-          <h3 style="margin: 0; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);">Routine Configuration</h3>
+    <div class="editor-shell">
+      <div class="library-header">
+        <div class="library-header__copy">
+          <button class="button button--ghost" data-action="back-to-list" type="button">Back to Routines</button>
+          <h1 style="margin-top: 14px;">Routine Editor</h1>
+          <p>Refining template: ${escapeHtml(routine.name || "Untitled")}</p>
         </div>
-        <div class="toolbar" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-          <button class="button button--primary" data-action="open-picker" type="button" style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.2rem; line-height: 1;">+</span> Browse Exercises
-          </button>
-          <button class="button button--danger button--ghost" data-action="delete-routine" type="button">Delete Routine</button>
+        <div class="library-header__actions">
+          <button class="button button--primary" data-action="open-picker" type="button">Add Exercise</button>
+          <button class="button button--ghost button--danger" data-action="delete-routine" type="button">Delete Routine</button>
         </div>
       </div>
-      <div class="panel__body stack">
-        <div class="field-grid">
-          <div class="field">
-            <label>Routine Name</label>
-            <input data-routine-field="name" type="text" value="${escapeHtml(routine.name)}">
-          </div>
-          <div class="field">
-            <label>Difficulty Score (1-10)</label>
-            <input data-routine-field="difficultyScore" type="number" min="1" max="10" step="1" value="${routine.difficultyScore ?? 1}">
-          </div>
-          <div class="field field--full">
-            <label>Routine Notes</label>
-            <textarea data-routine-field="notes">${escapeHtml(routine.notes)}</textarea>
-          </div>
-        </div>
 
-        <div class="exercise-list">
-          ${entries.length === 0 ? '<p class="muted" style="text-align: center; padding: 40px; border: 2px dashed rgba(143,168,210,0.1); border-radius: var(--radius-md);">No exercises yet. Click "Browse Exercises" to start building.</p>' : entries.map((exercise) => renderExerciseCard(exercise, state)).join("")}
+      <section class="panel panel--section">
+        <div class="panel__header">
+          <div>
+            <span class="eyebrow">Routine configuration</span>
+            <h3 class="panel__title" style="margin-top: 8px;">Template settings</h3>
+            <p class="panel__copy">Define the reusable session block, then arrange the exercise instances below.</p>
+          </div>
         </div>
+        <div class="panel__body stack">
+          <div class="field-grid">
+            <div class="field">
+              <label>Routine name</label>
+              <input data-routine-field="name" type="text" value="${escapeHtml(routine.name)}">
+            </div>
+            <div class="field">
+              <label>Difficulty score (1-10)</label>
+              <input data-routine-field="difficultyScore" type="number" min="1" max="10" step="1" value="${routine.difficultyScore ?? 1}">
+            </div>
+            <div class="field field--full">
+              <label>Routine notes</label>
+              <textarea data-routine-field="notes">${escapeHtml(routine.notes)}</textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel--section">
+        <div class="panel__header">
+          <div>
+            <span class="eyebrow">Exercise flow</span>
+            <h3 class="panel__title" style="margin-top: 8px;">Ordered routine entries</h3>
+            <p class="panel__copy">Each entry is the instanced exercise prescription this routine will execute.</p>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div class="exercise-list">
+            ${entries.length === 0 ? '<p class="muted" style="text-align: center; padding: 40px; border: 2px dashed rgba(143,168,210,0.1); border-radius: var(--radius-md);">No exercises yet. Click "Add Exercise" to start building.</p>' : entries.map((exercise) => renderExerciseCard(exercise, state)).join("")}
+          </div>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button class="button button--ghost" data-action="back-to-list">Discard Changes</button>
+        <button class="button button--primary" data-action="save-routine">Save Changes</button>
       </div>
-    </section>
-
-    <!-- Standardized Action Bar -->
-    <div class="form-actions" style="position: fixed; bottom: 0; left: 0; right: 0; background: rgba(9, 17, 31, 0.95); backdrop-filter: blur(10px); border-top: 1px solid rgba(143, 168, 210, 0.2); padding: 20px; z-index: 100; display: flex; justify-content: center; gap: 20px;">
-      <button class="button button--ghost" data-action="back-to-list" style="min-width: 180px;">Discard Changes</button>
-      <button class="button button--primary" data-action="save-routine" style="min-width: 180px;">Save Changes</button>
     </div>
   `;
 }
@@ -205,34 +323,30 @@ export function renderRoutineView(container, { state, actions }) {
   if (!selectedRoutine) {
     container.innerHTML = `
       <section class="page page-single">
-        <div class="panel">
-          <div class="panel__header">
-            <div>
-              <h2 class="panel__title">Routine Library</h2>
-              <p class="panel__copy">Manage your reusable training blocks.</p>
-            </div>
-            <div class="toolbar">
-              <button class="button button--primary" data-action="create-routine" type="button">New Routine</button>
-            </div>
+        <div class="library-header">
+          <div class="library-header__copy">
+            <h1>Routine Library</h1>
+            <p>Reusable session blocks that your plans execute without storing duplicate exercise names.</p>
           </div>
-          <div class="panel__body">
-            ${routines.length === 0 ? '<p class="muted">No routines found. Create one!</p>' : `
-              <div class="card-grid">
-                ${routines.map(routine => `
-                  <div class="exercise-card" style="display: flex; flex-direction: column; padding: 24px;">
-                    <h3 class="exercise-card__title" style="font-size: 1.2rem; color: var(--brand); margin-bottom: 8px;">${escapeHtml(routine.name || "Untitled Routine")}</h3>
-                    <p class="muted" style="font-size: 0.9rem; margin-bottom: 24px; flex-grow: 1;">${escapeHtml(routine.notes ? (routine.notes.length > 120 ? routine.notes.slice(0, 120) + '...' : routine.notes) : "No description")}</p>
-                    <div style="font-size: 0.85rem; color: var(--soft); margin-bottom: 16px; display: flex; justify-content: space-between;">
-                      <span>${formatExerciseCount((routine.entries || routine.exercises || []).length)}</span>
-                      <span style="color: var(--brand-2); font-weight: 700;">Score: ${routine.difficultyScore ?? 1}</span>
-                    </div>
-                    <button class="button button--ghost" data-action="select-routine" data-routine-id="${routine.id}" type="button" style="width: 100%;">Edit Routine</button>
-                  </div>
-                `).join('')}
-              </div>
-            `}
+          <div class="library-header__actions">
+            <button class="button button--primary" data-action="create-routine" type="button">New Routine</button>
           </div>
         </div>
+
+        ${routines.length === 0 ? `
+          <section class="panel">
+            <div class="panel__body">
+              <div class="empty-state">
+                <h3>No routines found</h3>
+                <p>Create a reusable routine to start assembling blueprint schedules and active plans.</p>
+              </div>
+            </div>
+          </section>
+        ` : `
+          <div class="plan-card-grid">
+            ${routines.map((routine) => renderRoutineLibraryCard(routine, state)).join("")}
+          </div>
+        `}
       </section>
     `;
   } else if (draftRoutine) {
@@ -245,14 +359,22 @@ export function renderRoutineView(container, { state, actions }) {
 
   // Bind Shared Listeners
   container.querySelector('[data-action="create-routine"]')?.addEventListener("click", () => actions.createRoutine());
+  container.querySelectorAll('[data-action="routine-card"]').forEach((card) => {
+    card.addEventListener("click", () => actions.selectRoutine(card.dataset.routineId));
+  });
   container.querySelectorAll('[data-action="select-routine"]').forEach((button) => {
-    button.addEventListener("click", () => actions.selectRoutine(button.dataset.routineId));
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      actions.selectRoutine(button.dataset.routineId);
+    });
   });
 
   if (!selectedRoutine || !draftRoutine) return;
 
   // Bind Editor Listeners
-  container.querySelector('[data-action="back-to-list"]')?.addEventListener('click', () => actions.selectRoutine(null));
+  container.querySelector('[data-action="back-to-list"]')?.addEventListener("click", () =>
+    actions.leaveRoutineEditor(),
+  );
   container.querySelector('[data-action="save-routine"]')?.addEventListener("click", () => actions.saveRoutine());
   container.querySelector('[data-action="delete-routine"]')?.addEventListener("click", () => {
     confirmAction(document.body, {
@@ -279,6 +401,39 @@ export function renderRoutineView(container, { state, actions }) {
     const { instanceId } = exerciseCard.dataset;
     exerciseCard.querySelectorAll("[data-field]").forEach((field) => {
       field.addEventListener("change", () => {
+        if (field.dataset.field === "trackingMode") {
+          const selectedMode = field.value;
+          const currentEntry = (state.draftRoutine?.entries || state.draftRoutine?.exercises || []).find((entry) => entry.id === instanceId) || {};
+          const nextPatch = selectedMode === "duration"
+            ? {
+                reps: null,
+                durationSeconds: currentEntry.durationSeconds ?? 30,
+                weight: null,
+                resistance: null,
+              }
+            : selectedMode === "weight"
+              ? {
+                  reps: currentEntry.reps ?? 5,
+                  durationSeconds: null,
+                  weight: currentEntry.weight ?? 20,
+                  resistance: null,
+                }
+              : selectedMode === "resistance"
+                ? {
+                    reps: currentEntry.reps ?? 10,
+                    durationSeconds: null,
+                    weight: null,
+                    resistance: currentEntry.resistance ?? "Band",
+                  }
+                : {
+                    reps: currentEntry.reps ?? 10,
+                    durationSeconds: null,
+                    weight: null,
+                    resistance: null,
+                  };
+          actions.updateExercise(instanceId, nextPatch);
+          return;
+        }
         actions.updateExercise(instanceId, { [field.dataset.field]: field.value });
       });
     });

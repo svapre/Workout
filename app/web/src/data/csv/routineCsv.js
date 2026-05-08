@@ -43,6 +43,22 @@ function ensureUniqueName(baseName, existingNames) {
   return candidate;
 }
 
+function inferEntryTrackingType(entry) {
+  if (entry?.trackingType) {
+    return mapTrackingType(entry.trackingType);
+  }
+  if (entry?.weight != null || entry?.targetWeightKg != null) {
+    return "weight";
+  }
+  if (entry?.durationSeconds != null || entry?.targetDurationSec != null) {
+    return "duration";
+  }
+  if (entry?.resistance != null && entry?.resistance !== "") {
+    return "resistance";
+  }
+  return "reps";
+}
+
 export function exportRoutinesToCsv(routines) {
   const rows = routines.flatMap((routine) => {
     const entries = routine.entries || routine.exercises || [];
@@ -51,7 +67,7 @@ export function exportRoutinesToCsv(routines) {
       exercise_order: index + 1,
       exercise_name: exercise.name ?? "",
       exercise_slug: exercise.exerciseSlug ?? "",
-      tracking_type: mapTrackingType(exercise.trackingType ?? exercise.mode ?? "reps"),
+      tracking_type: inferEntryTrackingType(exercise),
       sets: exercise.sets ?? exercise.targetSets ?? "",
       reps: exercise.reps ?? exercise.targetReps ?? "",
       duration_seconds: exercise.durationSeconds ?? exercise.targetDurationSec ?? "",
@@ -94,17 +110,21 @@ export function importRoutinesFromCsv(csvText, existingNames) {
       .sort((left, right) => Number(left.exercise_order || 0) - Number(right.exercise_order || 0))
       .map((row, index) => {
         const modeRaw = row.tracking_type?.trim() || row.mode?.trim() || "reps-only";
+        const trackingType = mapTrackingType(modeRaw);
+        const reps = toNumberOrNull(row.reps ?? row.target_reps);
+        const durationSeconds = toNumberOrNull(row.duration_seconds ?? row.target_duration_sec);
+        const weight = toNumberOrNull(row.weight_kg ?? row.target_weight_kg);
+        const resistance = row.resistance?.trim() || null;
         return {
           id: createId("exercise"),
           order: index + 1,
           name: row.exercise_name?.trim() || `Exercise ${index + 1}`,
           exerciseSlug: row.exercise_slug?.trim() || "",
-          trackingType: mapTrackingType(modeRaw),
           sets: toNumberOrNull(row.sets ?? row.target_sets),
-          reps: toNumberOrNull(row.reps ?? row.target_reps),
-          durationSeconds: toNumberOrNull(row.duration_seconds ?? row.target_duration_sec),
-          weight: toNumberOrNull(row.weight_kg ?? row.target_weight_kg),
-          resistance: row.resistance?.trim() || null,
+          reps: trackingType === "duration" ? null : reps,
+          durationSeconds: trackingType === "duration" ? durationSeconds : null,
+          weight: trackingType === "weight" ? weight : null,
+          resistance: trackingType === "resistance" ? resistance : null,
           restSeconds: toNumberOrNull(row.rest_seconds ?? row.rest_sec),
           notes: row.notes?.trim() || "",
         };

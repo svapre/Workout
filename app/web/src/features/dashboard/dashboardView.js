@@ -1,108 +1,4 @@
-import { evaluateStageProgress } from '../plans/progressionEngine.js';
-
-export function renderDashboardView(container, { state, actions }) {
-  const activePlans = state.activePlans || [];
-
-  // Summary cards
-  const totalRoutines = state.routines?.length ?? 0;
-  const totalExercises = state.exercises?.length ?? 0;
-  const totalWorkouts = state.workouts?.length ?? 0;
-  const totalActivePlans = activePlans.length;
-
-  container.innerHTML = `
-    <section class="page page-single">
-      <div style="text-align: center; margin-bottom: 48px; padding-top: 20px;">
-        <h1 style="font-size: clamp(2rem, 5vw, 3rem); color: var(--text); margin: 0 0 12px;">Dashboard</h1>
-        <p style="color: var(--soft); font-size: 1.1rem; max-width: 600px; margin: 0 auto;">Your training overview at a glance.</p>
-      </div>
-
-      <div class="card-grid" style="margin-bottom: 48px;">
-        <div class="panel" style="text-align: center; padding: 24px;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand);">${totalActivePlans}</div>
-          <div style="font-size: 0.85rem; color: var(--soft); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px;">Active Plans</div>
-        </div>
-        <div class="panel" style="text-align: center; padding: 24px;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-2);">${totalWorkouts}</div>
-          <div style="font-size: 0.85rem; color: var(--soft); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px;">Workouts Logged</div>
-        </div>
-        <div class="panel" style="text-align: center; padding: 24px;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);">${totalRoutines}</div>
-          <div style="font-size: 0.85rem; color: var(--soft); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px;">Routines</div>
-        </div>
-        <div class="panel" style="text-align: center; padding: 24px;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: var(--text);">${totalExercises}</div>
-          <div style="font-size: 0.85rem; color: var(--soft); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px;">Exercises</div>
-        </div>
-      </div>
-
-      ${activePlans.length === 0 ? `
-        <div class="panel" style="max-width: 600px; margin: 0 auto; text-align: center; padding: 40px 24px;">
-          <div style="font-size: 3rem; margin-bottom: 16px;">🗺️</div>
-          <h3 style="margin-bottom: 12px;">No Active Roadmaps</h3>
-          <p style="color: var(--soft); margin-bottom: 24px;">Go to the Plans library and activate a plan to start tracking your progress.</p>
-          <button class="button button--primary" data-action="go-to-plans" type="button" style="padding: 10px 24px;">Explore Plans</button>
-        </div>
-      ` : `
-        <div style="margin-bottom: 32px;">
-          <h2 style="font-size: 1.4rem; margin-bottom: 24px; color: var(--text);">Active Roadmaps</h2>
-          <div class="card-grid">
-            ${activePlans.map(plan => {
-              const stages = plan.stages || [];
-              const stageCount = stages.length;
-              const unlockedCount = stages.filter(s => evaluateStageProgress(s, state.workouts, state.routines, plan).isUnlocked).length;
-              const progressPct = stageCount > 0 ? Math.round((unlockedCount / stageCount) * 100) : 0;
-              
-              const currentStage = stages.find(s => s.id === plan.currentStageId);
-              const currentStageName = currentStage?.name || 'Not started';
-              const milestoneCount = plan.goals?.length ?? 0;
-              const isCompleted = unlockedCount === stageCount && stageCount > 0;
-
-              return `
-                <div class="panel" style="padding: 24px; display: flex; flex-direction: column; position: relative; overflow: hidden;">
-                  ${isCompleted ? `
-                    <div style="position: absolute; top: 12px; right: 12px; padding: 4px 12px; background: var(--brand); color: var(--bg); font-size: 0.7rem; font-weight: 800; border-radius: 4px; transform: rotate(5deg); box-shadow: 0 4px 10px rgba(79, 209, 197, 0.4);">COMPLETED</div>
-                  ` : ''}
-                  <div style="display: inline-block; padding: 4px 10px; background: rgba(79, 209, 197, 0.1); border: 1px solid rgba(79, 209, 197, 0.25); border-radius: 999px; color: var(--brand); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; width: fit-content;">${isCompleted ? 'Finished' : 'Active'}</div>
-                  <h3 style="font-size: 1.2rem; margin: 0 0 8px; color: var(--text);">${escapeHtml(plan.name)}</h3>
-                  <p style="color: var(--soft); font-size: 0.9rem; margin-bottom: 16px; flex-grow: 1;">${escapeHtml(plan.description ? plan.description.slice(0, 80) + '...' : '')}</p>
-                  
-                  <div style="margin-bottom: 16px;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--soft); margin-bottom: 6px;">
-                      <span>Progress</span>
-                      <span>${progressPct}%</span>
-                    </div>
-                    <div style="height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden;">
-                      <div style="height: 100%; width: ${progressPct}%; background: linear-gradient(90deg, var(--brand), var(--brand-2)); border-radius: 3px; transition: width 0.5s ease-out;"></div>
-                    </div>
-                  </div>
-
-                  <div style="display: flex; gap: 12px; font-size: 0.85rem; color: var(--soft); margin-bottom: 12px;">
-                    <span>🏆 ${milestoneCount} milestones</span>
-                    <span>📍 ${stageCount} stages</span>
-                  </div>
-                  <div style="padding: 8px 12px; background: rgba(246, 173, 85, 0.08); border: 1px solid rgba(246, 173, 85, 0.2); border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px;">
-                    <span style="color: var(--brand-2); font-weight: 700;">Current:</span> <span style="color: var(--text);">${escapeHtml(currentStageName)}</span>
-                  </div>
-                  <button class="button button--ghost" data-action="go-to-active-plans" type="button" style="padding: 8px;">View Roadmap →</button>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
-      `}
-    </section>
-  `;
-
-  container.querySelector('[data-action="go-to-plans"]')?.addEventListener('click', () => {
-    actions.navigate('plans');
-  });
-
-  container.querySelectorAll('[data-action="go-to-active-plans"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      actions.navigate('active-plans');
-    });
-  });
-}
+import { evaluateStageProgress } from "../plans/progressionEngine.js";
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -110,4 +6,147 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+function formatRelativeDate(date) {
+  const now = new Date();
+  const days = Math.round((now - date) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function resolveTheme(theme = {}) {
+  const rawIcon = String(theme.icon ?? "PL");
+  return {
+    color: theme.color || "#4FD1C5",
+    icon: /Ã°|ð/.test(rawIcon) ? "PL" : rawIcon,
+  };
+}
+
+function resolveProgressMeter(progress) {
+  if (progress.requiresTest) {
+    const target =
+      progress.eligibility.type === "none"
+        ? 1
+        : Math.max(1, Number(progress.eligibility.target ?? 1));
+    const current =
+      progress.eligibility.type === "none"
+        ? (progress.isReadyForTest || progress.isComplete ? 1 : 0)
+        : Math.max(0, Number(progress.eligibility.current ?? 0));
+    return { current, target };
+  }
+
+  if (progress.target == null || Number(progress.target) === 0) {
+    return { current: progress.isComplete ? 1 : 0, target: 1 };
+  }
+
+  return {
+    current: Math.max(0, Number(progress.current ?? 0)),
+    target: Math.max(1, Number(progress.target ?? 1)),
+  };
+}
+
+function renderSummaryCard(plan, routines, workouts, exercises) {
+  const stageIndex = plan.currentStageIndex ?? 0;
+  const stage = plan.stages?.[stageIndex] || { name: "Stage", schedule: [] };
+  const scheduleEntry = stage.schedule?.[Math.max(0, (plan.currentDayInCycle ?? 1) - 1)] || {};
+  const isRest = scheduleEntry.type === "rest";
+  const nextRoutine = routines.find((routine) => routine.id === scheduleEntry.routineId);
+  const nextRoutineName = nextRoutine?.name || (isRest ? "Recovery Day" : "Today's session");
+  const theme = resolveTheme(plan.theme);
+  const stageProgress = evaluateStageProgress(stage, workouts || [], routines || [], plan, exercises || []);
+  const { current: progressCurrent, target: progressTarget } = resolveProgressMeter(stageProgress);
+  const progressPct = Math.min(100, Math.round((progressCurrent / progressTarget) * 100));
+  const scheduleLength = stage.schedule?.length || 1;
+  const stageLabel = stage.name ? escapeHtml(stage.name) : `Stage ${stageIndex + 1}`;
+  const statusText = isRest
+    ? `Rest phase / ${stageLabel}`
+    : `Stage ${stageIndex + 1} / Day ${plan.currentDayInCycle ?? 1} of ${scheduleLength}`;
+
+  return `
+    <article class="plan-card ${isRest ? "plan-card--rest" : ""}" style="--plan-color: ${theme.color};" data-action="view-plan" data-plan-id="${plan.id}">
+      <div class="plan-card__top">
+        <div class="plan-card__icon">${escapeHtml(theme.icon)}</div>
+        <div class="plan-card__info">
+          <h2 class="plan-card__title">${escapeHtml(plan.displayName || plan.name)}</h2>
+          <p class="plan-card__subtitle">${escapeHtml(plan.goal || plan.description || "Built for consistency.")}</p>
+        </div>
+      </div>
+
+      <div class="plan-card__mission">
+        <div class="plan-card__mission-label">${isRest ? "Recovery focus" : "Today's mission"}</div>
+        <h3 class="plan-card__mission-title">${escapeHtml(nextRoutineName)}</h3>
+        <p class="plan-card__mission-note">${escapeHtml(isRest ? "A lighter day to recover, restore, and get ready for the next workout." : plan.goal || "Move with intent and follow today's plan.")}</p>
+      </div>
+
+      <div class="plan-card__progress">
+        <div class="plan-card__progress-title">${escapeHtml(statusText)}</div>
+        <div class="plan-card__progress-bar">
+          <div class="plan-card__progress-fill" style="width: ${progressPct}%;"></div>
+        </div>
+        <div class="plan-card__progress-text">${escapeHtml(stageProgress.progressText)}</div>
+      </div>
+    </article>
+  `;
+}
+
+export function renderDashboardView(container, { state, actions }) {
+  const activePlans = state.activePlans || [];
+  const workouts = state.workouts || [];
+  const planSessions = workouts.filter((workout) => workout.activePlanId);
+  const lastLog = [...planSessions].sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0];
+
+  const lastWorkoutText = lastLog
+    ? `Last workout ${formatRelativeDate(new Date(lastLog.completedAt))}`
+    : "No workouts yet";
+  const greeting = getGreeting();
+
+  container.innerHTML = `
+    <section class="page page-single">
+      <div class="dashboard-arrival">
+        <h1 class="dashboard-arrival__headline">${greeting}</h1>
+        <div class="dashboard-arrival__subline">${activePlans.length} active plan${activePlans.length === 1 ? "" : "s"} / ${lastWorkoutText}</div>
+      </div>
+
+      ${activePlans.length === 0 ? `
+        <div class="panel panel--section">
+          <div class="panel__body" style="text-align: center;">
+            <p style="color: var(--muted); margin-bottom: 20px;">No active plans yet. Activate a plan to start training.</p>
+            <button class="button button--primary" data-action="go-to-plans" type="button">Browse Plans</button>
+          </div>
+        </div>
+      ` : `
+        <div class="dashboard-section">
+          <div class="dashboard-section__header">
+            <div>
+              <div class="dashboard-section__label">Ready to train</div>
+              <div class="dashboard-section__description">Your current plans and what to execute next.</div>
+            </div>
+          </div>
+          <div class="plan-card-grid">
+            ${activePlans.map((plan) => renderSummaryCard(plan, state.routines || [], state.workouts || [], state.exercises || [])).join("")}
+          </div>
+        </div>
+      `}
+    </section>
+  `;
+
+  container.querySelector('[data-action="go-to-plans"]')?.addEventListener("click", () => {
+    actions.navigate("plans");
+  });
+
+  container.querySelectorAll('[data-action="view-plan"]').forEach((card) => {
+    card.addEventListener("click", () => {
+      actions.navigate(`active-plan/${card.dataset.planId}`);
+    });
+  });
 }

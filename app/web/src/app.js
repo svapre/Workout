@@ -16,13 +16,28 @@ import { renderRoutineView } from "./features/routines/routineView.js";
 import { createRoutineService } from "./features/routines/routineService.js";
 import { createWorkoutService } from "./features/workouts/workoutService.js";
 import { createPlanService } from "./features/plans/planService.js";
+import { evaluateStageProgress } from "./features/plans/progressionEngine.js";
+import { buildAdvanceStagePatch, buildRestDayCompletionPatch } from "./features/plans/stageProgression.js";
+import {
+  createDefaultMilestone,
+  getExerciseDefaultTrackingType,
+  inferRoutineEntryTrackingType,
+} from "./data/schemaMigration.js";
 import { renderWorkoutView } from "./features/workouts/workoutView.js";
 import { renderPlansView } from "./features/plans/plansView.js?v=10";
 import { renderActivePlansView } from "./features/activePlans/activePlansView.js";
 import { createActivePlanService } from "./features/activePlans/activePlanService.js";
+import { getNextRoutine } from "./features/activePlans/activePlanUtils.js";
 import { renderShell } from "./ui/shell.js";
 import { renderActivePlanDetailView } from "./features/activePlans/activePlanDetailView.js";
-import { renderWorkoutPlayerView } from "./features/workoutPlayer/workoutPlayerView.js";
+import { renderActivePlanEditorView } from "./features/activePlans/activePlanEditorView.js";
+import { renderActivePlanRevisionView } from "./features/activePlans/activePlanRevisionView.js";
+import {
+  renderWorkoutPlayerView,
+  hasWorkoutPlayerUnsavedProgress,
+  discardWorkoutPlayerSession,
+} from "./features/workoutPlayer/workoutPlayerView.js";
+import { confirmUnsavedChanges, confirmAbandonWorkout, confirmAction } from "./ui/modal.js";
 
 function normalizeSelectedId(items, selectedId) {
   if (selectedId === null || selectedId === undefined) {
@@ -54,27 +69,38 @@ export function createApp(root) {
   const planRepository = createPlanRepository(planStore, createSeedPlans, "plan_blueprints");
   const activePlanStore = createLocalStore("workout-app.activePlans.v1");
   const activePlanRepository = createPlanRepository(activePlanStore, () => [], "active_plans");
-  const planService = createPlanService(planRepository, activePlanRepository);
+  const planService = createPlanService(planRepository, activePlanRepository, {
+    workoutRepository,
+    exerciseRepository,
+    routineRepository,
+    bodyMapRepository,
+  });
   const activePlanService = createActivePlanService(activePlanRepository);
-  const router = createRouter(["routines", "exercises", "workouts", "plans", "active-plans", "active-plan", "workout-player"], "active-plans");
+  const router = createRouter(["routines", "exercises", "workouts", "plans", "active-plans", "active-plan", "active-plan-edit", "active-plan-revision", "workout-player"], "active-plans");
 
   const initialExercises = exerciseService.getAll();
   const initialRoutines = routineService.getAll();
   const initialWorkouts = workoutService.getAll();
   const store = createStore({
     route: router.getCurrentRoute(),
-    notice: "Modular app shell ready. Routines are stored locally in your browser.",
+    notice: "",
     exercises: initialExercises,
     selectedExerciseId: null,
     routines: initialRoutines,
     selectedRoutineId: null,
     workouts: initialWorkouts,
     selectedWorkoutId: initialWorkouts[0]?.id ?? null,
+    selectedHistoryPlanId: null,
     plans: planService.getAllBlueprints(),
     activePlans: activePlanService.getAll(),
     archivedPlans: createLocalStore("workout-app.archivedPlans.v1").load() || [],
     selectedPlanId: null,
     selectedActivePlanId: null,
+    pendingActivePlanRevision: null,
+    activePlanEditMode: false,
+    editingActivePlanStageId: null,
+    draftActivePlan: null,
+    activePlanStageDraft: null,
     planEditMode: false,
     editingStageId: null,
     draftBlueprint: null,
@@ -83,29 +109,86 @@ export function createApp(root) {
     expandedExerciseIds: new Set(),
   });
 
-  // Master Seed Injection Logic
-  const currentPlans = planService.getAllBlueprints();
-  const masterPlanId = "plan_master_rehab_strength";
-  
-  if (!currentPlans.some(p => p.id === masterPlanId)) {
-    console.log("Master Seed missing. Re-injecting strict database cascade...");
-    
-    // Clear potentially corrupted data
-    exerciseRepository.replaceAll(createSeedExerciseCatalog());
-    routineRepository.replaceAll(createSeedRoutines());
-    planRepository.replaceAll(createSeedPlans());
-    
-    store.setState({ 
-      exercises: exerciseService.getAll(),
-      routines: routineService.getAll(),
-      plans: planService.getAllBlueprints()
+  function getPrimaryNavResetPatch() {
+    return {
+      selectedPlanId: null,
+      planEditMode: false,
+      draftBlueprint: null,
+      editingStageId: null,
+      stageDraft: null,
+      selectedRoutineId: null,
+      draftRoutine: null,
+      selectedExerciseId: null,
+        selectedWorkoutId: null,
+        selectedHistoryPlanId: null,
+        selectedActivePlanId: null,
+        pendingActivePlanRevision: null,
+        activePlanEditMode: false,
+        editingActivePlanStageId: null,
+        draftActivePlan: null,
+        activePlanStageDraft: null,
+      };
+  }
+
+  function effectiveBlueprintDraft(state) {
+    const { draftBlueprint, stageDraft } = state;
+    if (!draftBlueprint) return null;
+    if (!stageDraft) return draftBlueprint;
+    const stages = draftBlueprint.stages.map((s) => (s.id === stageDraft.id ? stageDraft : s));
+    return { ...draftBlueprint, stages };
+  }
+
+  function isBlueprintDirty(state) {
+    const effective = effectiveBlueprintDraft(state);
+    if (!effective || !state.selectedPlanId) return false;
+    const saved = state.plans.find((p) => p.id === effective.id);
+    if (!saved) return true;
+    return JSON.stringify(effective) !== JSON.stringify(saved);
+  }
+
+  function isRoutineDraftDirty(state) {
+    const { draftRoutine, selectedRoutineId, routines } = state;
+    if (!draftRoutine || !selectedRoutineId) return false;
+    const saved = routines.find((r) => r.id === selectedRoutineId);
+    if (!saved) return true;
+    return JSON.stringify(draftRoutine) !== JSON.stringify(saved);
+  }
+
+  function effectiveActivePlanDraft(state) {
+    const { draftActivePlan, activePlanStageDraft } = state;
+    if (!draftActivePlan) return null;
+    if (!activePlanStageDraft) return draftActivePlan;
+    const stages = draftActivePlan.stages.map((stage) =>
+      stage.id === activePlanStageDraft.id ? activePlanStageDraft : stage,
+    );
+    return { ...draftActivePlan, stages };
+  }
+
+  function isActivePlanDraftDirty(state) {
+    const effective = effectiveActivePlanDraft(state);
+    if (!effective?.id) return false;
+    const saved = state.activePlans.find((plan) => plan.id === effective.id);
+    if (!saved) return true;
+    return JSON.stringify(effective) !== JSON.stringify(saved);
+  }
+
+  function clearActivePlanDraftState() {
+    store.setState({
+      activePlanEditMode: false,
+      editingActivePlanStageId: null,
+      draftActivePlan: null,
+      activePlanStageDraft: null,
     });
   }
 
+  function isActivePlanEditorWorkflowRoute(route, state = store.getState()) {
+    if (route.startsWith("active-plan-edit/")) {
+      return true;
+    }
+    return route.startsWith("active-plan-revision/") && state.pendingActivePlanRevision?.reviewMode === "editor";
+  }
+
   const actions = {
-    navigate(route) {
-      router.navigate(route);
-    },
     clearNotice() {
       store.setState({ notice: "" });
     },
@@ -130,13 +213,91 @@ export function createApp(root) {
     selectWorkout(workoutId) {
       store.setState({ selectedWorkoutId: workoutId });
     },
+    selectHistoryPlan(planId) {
+      const normalizedPlanId = planId || null;
+      const workouts = store.getState().workouts;
+      const currentSelectedWorkout = workouts.find(
+        (workout) =>
+          workout.id === store.getState().selectedWorkoutId &&
+          (!normalizedPlanId || workout.activePlanId === normalizedPlanId),
+      );
+      const fallbackWorkout = workouts.find(
+        (workout) => !normalizedPlanId || workout.activePlanId === normalizedPlanId,
+      );
+
+      store.setState({
+        selectedHistoryPlanId: normalizedPlanId,
+        selectedWorkoutId: currentSelectedWorkout?.id ?? fallbackWorkout?.id ?? null,
+      });
+    },
     selectPlan(planId) {
-      const plan = store.getState().plans.find(p => p.id === planId);
-      store.setState({ 
-        selectedPlanId: planId, 
-        planEditMode: false, 
+      if (planId == null || planId === "") {
+        store.setState({
+          selectedPlanId: null,
+          planEditMode: false,
+          editingStageId: null,
+          draftBlueprint: null,
+          stageDraft: null,
+        });
+        return;
+      }
+      const plan = store.getState().plans.find((p) => p.id === planId);
+      store.setState({
+        selectedPlanId: planId,
+        planEditMode: false,
         editingStageId: null,
-        draftBlueprint: plan ? JSON.parse(JSON.stringify(plan)) : null
+        draftBlueprint: plan ? JSON.parse(JSON.stringify(plan)) : null,
+        stageDraft: null,
+      });
+    },
+    leavePlanLibraryDetail() {
+      const state = store.getState();
+      if (!isBlueprintDirty(state)) {
+        actions.selectPlan(null);
+        return;
+      }
+      confirmUnsavedChanges(document.body, {
+        message:
+          "Leaving will close this blueprint. Save your edits to the library, discard them, or stay on this screen.",
+        onSave: () => {
+          actions.saveBlueprint();
+          actions.selectPlan(null);
+        },
+        onDiscard: () => actions.selectPlan(null),
+      });
+    },
+    leaveRoutineEditor() {
+      const state = store.getState();
+      if (!isRoutineDraftDirty(state)) {
+        actions.selectRoutine(null);
+        return;
+      }
+      confirmUnsavedChanges(document.body, {
+        message:
+          "Leaving will close this routine. Save your edits, discard them, or stay on this screen.",
+        onSave: () => actions.saveRoutine(),
+        onDiscard: () => actions.selectRoutine(null),
+      });
+    },
+    exitBlueprintEditorToDetail(planId) {
+      const state = store.getState();
+      if (!isBlueprintDirty(state)) {
+        actions.togglePlanEditMode(false);
+        actions.selectPlan(planId);
+        return;
+      }
+      confirmUnsavedChanges(document.body, {
+        message:
+          "Leave the editor? Save your blueprint changes, discard them, or stay on this screen.",
+        onSave: () => {
+          actions.saveBlueprint();
+          actions.togglePlanEditMode(false);
+          actions.selectPlan(planId);
+        },
+        onDiscard: () => {
+          actions.togglePlanEditMode(false);
+          actions.selectPlan(planId);
+        },
       });
     },
     setEditingStageId(stageId) {
@@ -146,10 +307,7 @@ export function createApp(root) {
         const stage = blueprint.stages.find(s => s.id === stageId);
         if (stage) {
           stageDraft = JSON.parse(JSON.stringify(stage));
-          // DATA SANITIZATION: Strip residual targetValue if exercise is missing (Legacy/Dirty data)
-          if (stageDraft.milestone?.type === "exercise_target" && !stageDraft.milestone.exerciseId) {
-            stageDraft.milestone.target = null;
-          }
+          stageDraft.milestone = createDefaultMilestone(stageDraft.milestone || {});
         }
       }
       store.setState({ editingStageId: stageId, stageDraft });
@@ -195,9 +353,15 @@ export function createApp(root) {
       }
     },
     saveBlueprint() {
-      const draft = store.getState().draftBlueprint;
-      if (draft) {
-        planService.updateBlueprint(draft.id, draft);
+      const { draftBlueprint, stageDraft } = store.getState();
+      let merged = draftBlueprint;
+      if (draftBlueprint && stageDraft) {
+        const stages = draftBlueprint.stages.map((s) => (s.id === stageDraft.id ? stageDraft : s));
+        merged = { ...draftBlueprint, stages };
+        store.setState({ draftBlueprint: merged, stageDraft: null, editingStageId: null });
+      }
+      if (merged) {
+        planService.updateBlueprint(merged.id, merged);
         syncCollections({ plans: planService.getAllBlueprints(), notice: "Blueprint saved successfully." });
         store.setState({ planEditMode: false });
       }
@@ -235,6 +399,187 @@ export function createApp(root) {
       activePlanService.updateActivePlan(planId, patch);
       syncCollections({ activePlans: activePlanService.getAll() });
     },
+    beginActivePlanEdit(planId) {
+      const plan = store.getState().activePlans.find((entry) => entry.id === planId);
+      if (!plan) {
+        return;
+      }
+
+      store.setState({
+        selectedActivePlanId: planId,
+        activePlanEditMode: true,
+        draftActivePlan: JSON.parse(JSON.stringify(plan)),
+        editingActivePlanStageId: null,
+        activePlanStageDraft: null,
+      });
+      router.navigate(`active-plan-edit/${planId}`);
+    },
+    leaveActivePlanEditorToDetail(planId) {
+      const state = store.getState();
+      if (!isActivePlanDraftDirty(state)) {
+        clearActivePlanDraftState();
+        actions.navigate(planId ? `active-plan/${planId}` : "active-plans");
+        return;
+      }
+
+      confirmUnsavedChanges(document.body, {
+        message:
+          "Leave the live plan editor? Save your live-plan changes, discard them, or stay on this screen.",
+        onSave: () => {
+          actions.saveActivePlanDraft();
+        },
+        onDiscard: () => {
+          clearActivePlanDraftState();
+          actions.navigate(planId ? `active-plan/${planId}` : "active-plans");
+        },
+      });
+    },
+    setEditingActivePlanStageId(stageId) {
+      const activePlan = store.getState().draftActivePlan;
+      let activePlanStageDraft = null;
+      if (activePlan && stageId) {
+        const stage = activePlan.stages.find((entry) => entry.id === stageId);
+        if (stage) {
+          activePlanStageDraft = JSON.parse(JSON.stringify(stage));
+          activePlanStageDraft.milestone = createDefaultMilestone(activePlanStageDraft.milestone || {});
+        }
+      }
+      store.setState({ editingActivePlanStageId: stageId, activePlanStageDraft });
+    },
+    updateActivePlanStageDraft(patch) {
+      const draft = store.getState().activePlanStageDraft;
+      if (!draft) {
+        return;
+      }
+      store.setState({ activePlanStageDraft: { ...draft, ...patch } });
+    },
+    commitActivePlanStageDraft() {
+      const { draftActivePlan, activePlanStageDraft } = store.getState();
+      if (!draftActivePlan || !activePlanStageDraft) {
+        return;
+      }
+      const stages = draftActivePlan.stages.map((stage) =>
+        stage.id === activePlanStageDraft.id ? activePlanStageDraft : stage,
+      );
+      store.setState({
+        draftActivePlan: { ...draftActivePlan, stages },
+        activePlanStageDraft: null,
+        editingActivePlanStageId: null,
+      });
+    },
+    updateActivePlanDraft(patch) {
+      const draft = store.getState().draftActivePlan;
+      if (!draft) {
+        return;
+      }
+      store.setState({ draftActivePlan: { ...draft, ...patch }, activePlanEditMode: true });
+    },
+    saveActivePlanDraft() {
+      const state = store.getState();
+      const merged = effectiveActivePlanDraft(state);
+      if (!merged) {
+        return;
+      }
+
+      try {
+        const review = planService.prepareDirectActivePlanEdit(merged.id, merged);
+        if (review.blockingIssues.length) {
+          store.setState({ notice: review.blockingIssues[0]?.message || "Unable to save the live plan draft." });
+          return;
+        }
+
+        if (review.stageMapping.requiresManualAnchor) {
+          store.setState({
+            draftActivePlan: merged,
+            activePlanStageDraft: null,
+            editingActivePlanStageId: null,
+            pendingActivePlanRevision: review,
+            notice: "Current-stage changes need a quick remap review before saving.",
+          });
+          router.navigate(`active-plan-revision/${merged.id}`);
+          return;
+        }
+
+        const updatedPlan = planService.applyActivePlanRevision(review);
+        clearActivePlanDraftState();
+        syncCollections({
+          activePlans: activePlanService.getAll(),
+          notice: `Saved live plan changes to "${updatedPlan.displayName || updatedPlan.name}".`,
+        });
+        router.navigate(`active-plan/${updatedPlan.id}`);
+      } catch (error) {
+        store.setState({ notice: error.message || "Unable to save the live plan draft." });
+      }
+    },
+    completeRestDay(planId) {
+      const plan = activePlanService.getActivePlan(planId);
+      if (!plan) {
+        return false;
+      }
+
+      const patch = buildRestDayCompletionPatch(plan);
+      const updatedPlan = activePlanService.updateActivePlan(planId, patch);
+      const currentStage = updatedPlan?.stages?.[updatedPlan.currentStageIndex ?? 0] ?? null;
+      const stageProgress = currentStage
+        ? evaluateStageProgress(
+            currentStage,
+            workoutService.getAll(),
+            routineService.getAll(),
+            updatedPlan,
+            exerciseService.getAll(),
+          )
+        : null;
+      const nextStage = updatedPlan?.stages?.[(updatedPlan?.currentStageIndex ?? 0) + 1] ?? null;
+      const nextRoutine = updatedPlan ? getNextRoutine(updatedPlan, routineService.getAll()) : null;
+      let notice = `${plan.displayName || plan.name}: rest step completed.`;
+
+      if (stageProgress?.isComplete && nextStage) {
+        notice = `${plan.displayName || plan.name}: rest step completed. ${currentStage?.name || "This stage"} is ready to advance to ${nextStage.name || "the next stage"}.`;
+      } else if (nextRoutine) {
+        notice = `${plan.displayName || plan.name}: rest step completed. Next up: ${nextRoutine.name}.`;
+      }
+
+      syncCollections({
+        activePlans: activePlanService.getAll(),
+        notice,
+      });
+      return true;
+    },
+    advanceStage(planId) {
+      const plan = activePlanService.getActivePlan(planId);
+      if (!plan) {
+        return false;
+      }
+
+      const stage = plan.stages?.[plan.currentStageIndex ?? 0] ?? null;
+      if (!stage) {
+        return false;
+      }
+
+      const progress = evaluateStageProgress(
+        stage,
+        workoutService.getAll(),
+        routineService.getAll(),
+        plan,
+        exerciseService.getAll(),
+      );
+
+      if (!progress.isComplete) {
+        return false;
+      }
+
+      const patch = buildAdvanceStagePatch(plan);
+      if (!patch) {
+        return false;
+      }
+
+      activePlanService.updateActivePlan(planId, patch);
+      syncCollections({
+        activePlans: activePlanService.getAll(),
+        notice: `${plan.displayName || plan.name}: advanced to the next stage.`,
+      });
+      return true;
+    },
     recordCompletedSession({ session, activePlanId, planPatch }) {
       workoutService.appendSession(session);
       activePlanService.updateActivePlan(activePlanId, planPatch);
@@ -243,9 +588,21 @@ export function createApp(root) {
         activePlans: activePlanService.getAll(),
       });
     },
+    updateSessionReflection(sessionId, reflectionRating) {
+      workoutService.updateSession(sessionId, { reflectionRating });
+      syncCollections({
+        workouts: workoutService.getAll(),
+      });
+    },
     deleteActivePlan(planId) {
-      activePlanService.deleteActivePlan(planId);
-      syncCollections({ activePlans: activePlanService.getAll(), selectedActivePlanId: null, notice: "Deleted active roadmap." });
+      const deletedPlan = activePlanService.deleteActivePlan(planId);
+      syncCollections({
+        activePlans: activePlanService.getAll(),
+        selectedActivePlanId: null,
+        notice: deletedPlan
+          ? `Removed "${deletedPlan.displayName || deletedPlan.name}" from active plans.`
+          : "Removed the active plan.",
+      });
     },
     archivePlan(planId) {
       const plans = activePlanService.getAll();
@@ -258,7 +615,7 @@ export function createApp(root) {
         syncCollections({ 
           activePlans: activePlanService.getAll(), 
           archivedPlans: archiveStore.load(),
-          notice: `Congratulations! "${plan.name}" has been archived.` 
+          notice: `"${plan.displayName || plan.name}" archived and moved into history.` 
         });
       }
     },
@@ -290,7 +647,7 @@ export function createApp(root) {
         const sourceEntries = draft.entries || draft.exercises || [];
         const entries = sourceEntries.map((ex) => {
           const catalogEntry = store.getState().exercises.find((e) => e.id === ex.exerciseId);
-          const type = catalogEntry?.trackingType || "reps";
+          const type = inferRoutineEntryTrackingType(ex, catalogEntry);
           const clean = {
             id: ex.id,
             exerciseId: ex.exerciseId,
@@ -304,18 +661,21 @@ export function createApp(root) {
             clean.reps = ex.reps;
             clean.durationSeconds = null;
             clean.weight = null;
+            clean.resistance = null;
           } else if (type === "duration") {
             clean.durationSeconds = ex.durationSeconds;
             clean.reps = null;
             clean.weight = null;
+            clean.resistance = null;
           } else if (type === "weight") {
             clean.reps = ex.reps;
             clean.weight = ex.weight;
             clean.durationSeconds = null;
+            clean.resistance = null;
           } else {
             clean.reps = ex.reps;
-            clean.durationSeconds = ex.durationSeconds;
-            clean.weight = ex.weight;
+            clean.durationSeconds = null;
+            clean.weight = null;
             clean.resistance = ex.resistance ?? null;
           }
           return clean;
@@ -331,15 +691,17 @@ export function createApp(root) {
       const draft = store.getState().draftRoutine;
       if (draft && exerciseId) {
         const entries = draft.entries || draft.exercises || [];
+        const exercise = store.getState().exercises.find((entry) => entry.id === exerciseId);
+        const defaultMode = getExerciseDefaultTrackingType(exercise);
         const newInstance = {
           id: `inst_${Date.now()}`,
           exerciseId,
           order: entries.length + 1,
           sets: 3,
-          reps: 10,
-          durationSeconds: null,
-          weight: null,
-          resistance: null,
+          reps: defaultMode === "duration" ? null : 10,
+          durationSeconds: defaultMode === "duration" ? 30 : null,
+          weight: defaultMode === "weight" ? 20 : null,
+          resistance: defaultMode === "resistance" ? "Band" : null,
           restSeconds: 45,
           notes: "",
         };
@@ -403,20 +765,28 @@ export function createApp(root) {
     async importRoutines(file) {
       const text = await file.text();
       if (file.name.toLowerCase().endsWith(".json")) {
-        const usedSlugs = new Set(store.getState().exercises.map((exercise) => exercise.slug));
-        const parsed = parseTrainingPlanImport(text, usedSlugs);
-        const exerciseSummary = exerciseService.importPrepared(parsed.exercises);
-        const routineSummary = routineService.importPrepared(parsed.routines);
-        const planSummary = planService.importPrepared([parsed]);
-        syncCollections({
-          plans: planService.getAllBlueprints(),
-          selectedPlanId: planSummary.firstPlanId ?? store.getState().selectedPlanId,
-          exercises: exerciseService.getAll(),
-          selectedExerciseId: exerciseSummary.firstExerciseId ?? store.getState().selectedExerciseId,
-          routines: routineService.getAll(),
-          selectedRoutineId: routineSummary.firstRoutineId,
-          notice: `Imported ${routineSummary.count} routine${routineSummary.count === 1 ? "" : "s"} and ${exerciseSummary.count} exercise reference${exerciseSummary.count === 1 ? "" : "s"} from ${file.name}.`,
-        });
+        try {
+          const currentExercises = store.getState().exercises;
+          const usedSlugs = new Set(currentExercises.map((exercise) => exercise.slug));
+          const parsed = parseTrainingPlanImport(text, {
+            usedExerciseSlugs: usedSlugs,
+            existingExercises: currentExercises,
+          });
+          const exerciseSummary = exerciseService.importPrepared(parsed.exercises);
+          const routineSummary = routineService.importPrepared(parsed.routines);
+          const planSummary = planService.importPrepared([parsed]);
+          syncCollections({
+            plans: planService.getAllBlueprints(),
+            selectedPlanId: planSummary.firstPlanId ?? store.getState().selectedPlanId,
+            exercises: exerciseService.getAll(),
+            selectedExerciseId: exerciseSummary.firstExerciseId ?? store.getState().selectedExerciseId,
+            routines: routineService.getAll(),
+            selectedRoutineId: routineSummary.firstRoutineId,
+            notice: `Imported ${routineSummary.count} routine${routineSummary.count === 1 ? "" : "s"} and ${exerciseSummary.count} exercise reference${exerciseSummary.count === 1 ? "" : "s"} from ${file.name}.`,
+          });
+        } catch (error) {
+          store.setState({ notice: error.message || `Unable to import ${file.name}.` });
+        }
         return;
       }
 
@@ -498,6 +868,202 @@ export function createApp(root) {
       URL.revokeObjectURL(url);
       store.setState({ notice: `Exported "${plan.name}" blueprint successfully.` });
     },
+    exportActivePlan(planId) {
+      const plan = activePlanService.getActivePlan(planId);
+      if (!plan) return;
+      const json = planService.exportActivePlan(planId);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${(plan.displayName || plan.name || "active-plan").toLowerCase().replace(/\s+/g, "-")}-export.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      store.setState({ notice: `Exported "${plan.displayName || plan.name}" active plan package successfully.` });
+    },
+    async importActivePlanRevision(planId, file) {
+      if (!file) {
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        const review = planService.prepareActivePlanRevision(planId, text);
+        store.setState({
+          pendingActivePlanRevision: review,
+          notice: `Loaded revision package from ${file.name}. Review before applying.`,
+        });
+        router.navigate(`active-plan-revision/${planId}`);
+      } catch (error) {
+        store.setState({
+          notice: error.message || `Unable to import ${file.name}.`,
+        });
+      }
+    },
+    updateActivePlanRevisionReview(patch) {
+      const current = store.getState().pendingActivePlanRevision;
+      if (!current) {
+        return;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(patch, "selectedStageAnchorId")) {
+        const refreshed = planService.refreshPreparedActivePlanRevision(current, {
+          selectedStageAnchorId: patch.selectedStageAnchorId,
+          changeSummary: patch.changeSummary ?? current.changeSummary,
+          staleAcknowledged: patch.staleAcknowledged ?? current.staleAcknowledged,
+        });
+        store.setState({ pendingActivePlanRevision: refreshed });
+        return;
+      }
+
+      store.setState({
+        pendingActivePlanRevision: {
+          ...current,
+          ...patch,
+        },
+      });
+    },
+    cancelActivePlanRevisionReview(planId) {
+      const review = store.getState().pendingActivePlanRevision;
+      store.setState({ pendingActivePlanRevision: null });
+      actions.navigate(review?.returnRoute || (planId ? `active-plan/${planId}` : "active-plans"));
+    },
+    applyActivePlanRevisionReview() {
+      const review = store.getState().pendingActivePlanRevision;
+      if (!review) {
+        return;
+      }
+
+      try {
+        const updatedPlan = planService.applyActivePlanRevision(review);
+        if (review.reviewMode === "editor") {
+          clearActivePlanDraftState();
+        }
+        syncCollections({
+          activePlans: activePlanService.getAll(),
+          routines: routineService.getAll(),
+          exercises: exerciseService.getAll(),
+          notice: review.reviewMode === "editor"
+            ? `Saved live plan changes to "${updatedPlan.displayName || updatedPlan.name}".`
+            : `Applied revision to "${updatedPlan.displayName || updatedPlan.name}".`,
+        });
+        store.setState({ pendingActivePlanRevision: null });
+        router.navigate(`active-plan/${updatedPlan.id}`);
+      } catch (error) {
+        store.setState({
+          notice: error.message || (review.reviewMode === "editor"
+            ? "Unable to save the live plan changes."
+            : "Unable to apply the active-plan revision."),
+        });
+      }
+    },
+    navigate(route) {
+      const isPrimarySection = !route.includes("/");
+      const state = store.getState();
+      const inActivePlanEditorWorkflow = isActivePlanEditorWorkflowRoute(state.route, state);
+      const stayingInActivePlanEditorWorkflow = isActivePlanEditorWorkflowRoute(route, state);
+
+      if (
+        inActivePlanEditorWorkflow &&
+        isActivePlanDraftDirty(state) &&
+        !stayingInActivePlanEditorWorkflow
+      ) {
+        confirmAction(document.body, {
+          title: "Discard live plan edits?",
+          message:
+            "Leaving now will discard your unsaved live-plan edits. Stay here or discard the draft.",
+          confirmText: "Discard edits",
+          cancelText: "Stay",
+          onConfirm: () => {
+            store.setState({ pendingActivePlanRevision: null });
+            clearActivePlanDraftState();
+            actions.navigate(route);
+          },
+        });
+        return;
+      }
+
+      const isLeavingWorkoutPlayer =
+        state.route.startsWith("workout-player/") &&
+        !route.startsWith("workout-player/");
+
+      const proceed = () => {
+        if (isLeavingWorkoutPlayer && !hasWorkoutPlayerUnsavedProgress()) {
+          discardWorkoutPlayerSession();
+        }
+        const isLeavingRevision =
+          store.getState().route.startsWith("active-plan-revision/") &&
+          !route.startsWith("active-plan-revision/");
+        if (isLeavingRevision) {
+          store.setState({ pendingActivePlanRevision: null });
+        }
+        if (isPrimarySection) {
+          store.setState(getPrimaryNavResetPatch());
+        }
+        router.navigate(route);
+      };
+
+      if (!isPrimarySection) {
+        const isLeavingRevision =
+          store.getState().route.startsWith("active-plan-revision/") &&
+          !route.startsWith("active-plan-revision/");
+        if (isLeavingRevision) {
+          store.setState({ pendingActivePlanRevision: null });
+        }
+        if (isLeavingWorkoutPlayer && !hasWorkoutPlayerUnsavedProgress()) {
+          discardWorkoutPlayerSession();
+        }
+        router.navigate(route);
+        return;
+      }
+
+      const bd = isBlueprintDirty(state);
+      const rd = isRoutineDraftDirty(state);
+      const pd = hasWorkoutPlayerUnsavedProgress();
+
+      if (!bd && !rd && !pd) {
+        proceed();
+        return;
+      }
+
+      if (pd && (bd || rd)) {
+        confirmAction(document.body, {
+          title: "Discard unsaved work?",
+          message:
+            "You have unsaved blueprint or routine edits and a workout in progress. Leaving discards the workout and any unsaved blueprint or routine changes.",
+          confirmText: "Discard all",
+          cancelText: "Stay",
+          onConfirm: () => {
+            discardWorkoutPlayerSession();
+            proceed();
+          },
+        });
+        return;
+      }
+
+      if (pd) {
+        confirmAbandonWorkout(document.body, {
+          onAbandon: () => {
+            discardWorkoutPlayerSession();
+            proceed();
+          },
+        });
+        return;
+      }
+
+      confirmUnsavedChanges(document.body, {
+        message:
+          "Leaving will close this view. You can save your changes to the library, discard them, or stay here.",
+        onSave: () => {
+          if (bd) actions.saveBlueprint();
+          if (rd && isRoutineDraftDirty(store.getState())) actions.saveRoutine();
+          proceed();
+        },
+        onDiscard: () => proceed(),
+      });
+    },
   };
 
   function syncCollections({
@@ -575,6 +1141,16 @@ export function createApp(root) {
 
     if (state.route === "active-plans") {
       renderActivePlansView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("active-plan-revision/")) {
+      renderActivePlanRevisionView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("active-plan-edit/")) {
+      renderActivePlanEditorView(outlet, { state, actions });
       return;
     }
 

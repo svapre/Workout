@@ -1,5 +1,8 @@
 {
   "name": "workout-app-web",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
 }

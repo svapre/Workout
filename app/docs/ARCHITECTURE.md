@@ -1,115 +1,75 @@
-# App Architecture
+# Architecture Rules
 
-## Goal
+## Stack
+- Vanilla JS, ES modules only
+- No frameworks (no React, Vue, Svelte, etc.)
+- No build step, no bundler
+- No external dependencies
+- localStorage only, fully offline
 
-Keep the app modular enough that we can change one concern without breaking unrelated features.
+## Separation of Concerns
+Views:     render HTML strings only, zero business logic
+Services:  business logic only, no DOM manipulation
+Repositories: data access only, one per data type
 
-## Module Boundaries
+## Single Source of Truth
+One owner per data type. Views resolve at render time.
+Never store copies of data in views or services.
 
-### `web/src/core`
+Resolution chain:
+- Exercise names/types → Exercise Repository via exerciseId
+- Routine structure → Routine Repository via routineId
+- Stage/milestone data → Active Plan stages array
+- Active state → Active Plan top-level fields
+- Session logs → Workout Repository
 
-Shared infrastructure only.
+NEVER store exercise names in routine entries or sessions.
+ALWAYS store exerciseId and resolve name at render time.
 
-- `router.js`: route state from the URL hash
-- `store.js`: small reactive state container
-- `uid.js`: stable id generation
+## File Structure
+app/web/src/
+  core/           → router.js, store.js, uid.js
+  data/
+    repositories/ → one file per data type
+    csv/          → csv import/export
+    import/       → JSON import
+  features/       → one folder per feature
+    exercises/
+    routines/
+    plans/
+    workouts/
+    activePlans/
+    workoutPlayer/
+    dashboard/
+  ui/             → shell.js, modal.js
 
-Rules:
+## CSS Rules
+- Inline styles only in view files
+- Use existing CSS variables:
+  var(--accent), var(--muted), var(--soft), var(--text)
+- No new CSS classes unless absolutely unavoidable
+- No new external stylesheets
 
-- no feature-specific logic here
-- no CSV assumptions here
-- no routine or workout domain rules here
+## Rules That Must Never Be Broken
+- Do NOT add frameworks
+- Do NOT add external dependencies
+- Do NOT build a recommendation engine
+- Do NOT make the app interpret reflection data and act on it
+- Do NOT bring back activeState nested object
+- Do NOT store exercise names, always store exerciseId
+- Do NOT write sessions to active plan, use workoutRepository
+- Do NOT add analytics dashboards to the main UI
+- Do NOT add social features
+- Do NOT add AI chat or suggestion features
+- Do NOT modify schema field names without updating SPEC.md
+  and getting human approval first
 
-### `web/src/data`
-
-Persistence and serialization.
-
-- `storage/`: storage adapters
-- `repositories/`: repository interfaces over persisted data
-- `csv/`: import/export translators
-- `import/`: structured JSON import translators
-- `defaults.js`: seed data only
-
-Rules:
-
-- knows how data is stored
-- does not decide how UI looks
-- does not own user interaction
-
-### `web/src/features/exercises`
-
-Internal exercise reference feature slice.
-
-- `exerciseService.js`: import/export and catalog logic
-- `exerciseView.js`: exercise library UI
-
-Rules:
-
-- owns exercise reference records
-- accepts open import formats from people, apps, or AI tools
-- does not own routine scheduling or workout history
-
-### `web/src/features/routines`
-
-Routine template feature slice.
-
-- `routineService.js`: business rules for routines and exercises
-- `routineView.js`: routine UI rendering and event wiring
-
-Rules:
-
-- owns template editing
-- owns template CSV import/export behavior
-- accepts generic plan-file imports that can create multiple routines
-- does not own performed workout logs
-
-### `web/src/features/workouts`
-
-Workout history and future live workout logging.
-
-Planned responsibility:
-
-- imported workout history from existing data sources
-- session lifecycle
-- set timing
-- actual reps and weight capture
-- workout and set export
-
-### `web/src/features/dashboard`
-
-Future config-driven dashboard rendering.
-
-Planned responsibility:
-
-- load dashboard config
-- resolve metrics
-- render widgets from normalized workout data
-
-### `web/src/ui`
-
-Shared shell and presentational scaffolding.
-
-- `shell.js`: top-level app frame and navigation
-
-Rules:
-
-- can compose features
-- should not absorb feature business rules
-
-## Why This Helps
-
-If we later change:
-
-- storage from `localStorage` to IndexedDB
-- CSV format
-- dashboard widget system
-- workout timer behavior
-
-we can do that mostly inside one module boundary instead of touching the whole app.
-
-## Near-Term Build Order
-
-1. Routine templates
-2. Workout logging
-3. Normalized exports
-4. Dashboard config renderer
+## What Requires Human Review Before Implementation
+See REVIEW_PROTOCOL.md for the full process.
+These changes ALWAYS require review:
+- Any change to data schemas
+- Any new repository or data store
+- Any new feature that did not previously exist
+- Any change to the progression engine logic
+- Any change to how sessions are written or read
+- Any UI that introduces user choices during execution mode
