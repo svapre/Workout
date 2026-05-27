@@ -310,13 +310,13 @@ await page.reload({ waitUntil: "networkidle" });
 
 await page.goto(`${BASE}/#/active-plan/active_rest_boundary`, { waitUntil: "networkidle" });
 await page.screenshot({ path: `${OUT_DIR}/01-recovery-before.png`, fullPage: true });
-const recoveryButtonBefore = (await page.locator('[data-action="apd-resume"]').textContent())?.trim() || "";
+const recoveryButtonBefore = (await page.locator('[data-action="apd-primary"]').textContent())?.trim() || "";
 const recoveryHashBefore = await page.evaluate(() => window.location.hash);
-await forceClick(page.locator('[data-action="apd-resume"]'));
+await forceClick(page.locator('[data-action="apd-primary"]'));
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT_DIR}/02-recovery-after.png`, fullPage: true });
 const recoveryHashAfter = await page.evaluate(() => window.location.hash);
-const recoveryButtonAfter = (await page.locator('[data-action="apd-resume"]').textContent())?.trim() || "";
+const recoveryButtonAfter = (await page.locator('[data-action="apd-primary"]').textContent())?.trim() || "";
 const recoverySecondaryText = (await page.locator('[data-action="apd-secondary"]').textContent().catch(() => ""))?.trim() || "";
 const restPlanAfter = await readActivePlan(page, "active_rest_boundary");
 observations.push({
@@ -336,7 +336,7 @@ observations.push({
 });
 
 await page.goto(`${BASE}/#/active-plan/active_finish_flow`, { waitUntil: "networkidle" });
-await forceClick(page.locator('[data-action="apd-resume"]'));
+await forceClick(page.locator('[data-action="apd-primary"]'));
 await page.waitForURL(/#\/workout-player\/active_finish_flow/);
 await forceClick(page.locator('[data-action="start"]'));
 await page.waitForTimeout(250);
@@ -370,7 +370,7 @@ observations.push({
 await seedState(page);
 await page.reload({ waitUntil: "networkidle" });
 await page.goto(`${BASE}/#/active-plan/active_finish_flow`, { waitUntil: "networkidle" });
-await forceClick(page.locator('[data-action="apd-resume"]'));
+await forceClick(page.locator('[data-action="apd-primary"]'));
 await page.waitForURL(/#\/workout-player\/active_finish_flow/);
 await forceClick(page.locator('[data-action="start"]'));
 await page.waitForTimeout(250);
@@ -397,7 +397,7 @@ observations.push({
 });
 
 await page.goto(`${BASE}/#/active-plan/active_bird_dog_flow`, { waitUntil: "networkidle" });
-await forceClick(page.locator('[data-action="apd-resume"]'));
+await forceClick(page.locator('[data-action="apd-primary"]'));
 await page.waitForURL(/#\/workout-player\/active_bird_dog_flow/);
 await forceClick(page.locator('[data-action="start"]'));
 await page.waitForTimeout(300);

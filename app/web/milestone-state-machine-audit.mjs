@@ -529,6 +529,24 @@ async function click(locator) {
   await locator.click();
 }
 
+async function readPrimaryActionLabel(page) {
+  const button = page.locator('[data-action="apd-primary"]');
+  await button.waitFor({ timeout: 5000 });
+  return (await button.textContent())?.trim() || "";
+}
+
+async function clickPrimaryAction(page, expectedPattern = null) {
+  const button = page.locator('[data-action="apd-primary"]');
+  await button.waitFor({ timeout: 5000 });
+  const label = (await button.textContent())?.trim() || "";
+  if (expectedPattern && !expectedPattern.test(label)) {
+    throw new Error(`Expected primary action to match ${expectedPattern}, but got "${label}".`);
+  }
+  await click(button);
+  await page.waitForTimeout(600);
+  return label;
+}
+
 async function startPlayer(page) {
   const startButton = page.locator('[data-action="start"]');
   await startButton.waitFor({ timeout: 5000 });
@@ -601,7 +619,7 @@ async function runPassFlow(page) {
   await page.goto(`${BASE}/#/active-plan/plan_pass`, { waitUntil: "networkidle" });
   await takeScreenshot(page, "01-pass-detail-initial");
 
-  await click(page.locator('[data-action="apd-resume"]'));
+  await clickPrimaryAction(page, /start workout/i);
   await startPlayer(page);
   await takeScreenshot(page, "02-pass-routine-active");
   await finishSingleSetSession(page, { reps: 5 });
@@ -609,9 +627,13 @@ async function runPassFlow(page) {
 
   await page.waitForURL(/#\/active-plan\/plan_pass/, { timeout: 5000 });
   await takeScreenshot(page, "03-pass-detail-test-unlocked");
-  console.log(`  Test CTA visible: ${await page.locator('[data-action="apd-test"]').isVisible()}`);
+  const unlockedLabel = await readPrimaryActionLabel(page);
+  if (!/take milestone test/i.test(unlockedLabel)) {
+    throw new Error(`Pass flow did not unlock the milestone test. Primary action was "${unlockedLabel}".`);
+  }
+  console.log(`  Primary action after unlock: ${unlockedLabel}`);
 
-  await click(page.locator('[data-action="apd-test"]'));
+  await clickPrimaryAction(page, /take milestone test/i);
   await startPlayer(page);
   await takeScreenshot(page, "04-pass-test-active");
   await finishSingleSetSession(page, { reps: 1 });
@@ -621,8 +643,17 @@ async function runPassFlow(page) {
   await page.waitForURL(/#\/active-plan\/plan_pass/, { timeout: 5000 });
   await takeScreenshot(page, "06-pass-detail-after-advance");
   const passState = await readActivePlanState(page, "plan_pass");
+  if (passState.currentStageIndex !== 1) {
+    throw new Error(`Pass flow should advance to stage 2, but currentStageIndex is ${passState.currentStageIndex}.`);
+  }
   console.log(`  Current stage after pass: ${passState.currentStageIndex}`);
   console.log(`  Stage history entries: ${passState.stageHistory.length}`);
+
+  const planTools = page.locator("details.journey-advanced").first();
+  if (!(await planTools.evaluate((element) => element.hasAttribute("open")))) {
+    await click(planTools.locator("summary"));
+    await page.waitForTimeout(300);
+  }
 
   const downloadPromise = page.waitForEvent("download");
   await click(page.locator('[data-action="apd-export"]'));
@@ -635,15 +666,19 @@ async function runRestartFlow(page) {
   await page.goto(`${BASE}/#/active-plan/plan_restart`, { waitUntil: "networkidle" });
   await takeScreenshot(page, "07-restart-detail-initial");
 
-  await click(page.locator('[data-action="apd-resume"]'));
+  await clickPrimaryAction(page, /start workout/i);
   await startPlayer(page);
   await finishSingleSetSession(page, { reps: 5 });
   await finishReflection(page, "normal");
 
   await page.waitForURL(/#\/active-plan\/plan_restart/, { timeout: 5000 });
   await takeScreenshot(page, "08-restart-detail-test-unlocked");
+  const unlockedLabel = await readPrimaryActionLabel(page);
+  if (!/take milestone test/i.test(unlockedLabel)) {
+    throw new Error(`Restart flow did not unlock the milestone test. Primary action was "${unlockedLabel}".`);
+  }
 
-  await click(page.locator('[data-action="apd-test"]'));
+  await clickPrimaryAction(page, /take milestone test/i);
   await startPlayer(page);
   await takeScreenshot(page, "09-restart-test-active");
   await finishSingleSetSession(page, { reps: 5 });
@@ -652,9 +687,12 @@ async function runRestartFlow(page) {
   await page.waitForURL(/#\/active-plan\/plan_restart/, { timeout: 5000 });
   await takeScreenshot(page, "10-restart-detail-after-fail");
   const restartState = await readActivePlanState(page, "plan_restart");
+  if (restartState.currentDayInCycle !== 1) {
+    throw new Error(`Restart flow should return to day 1 after failure, but currentDayInCycle is ${restartState.currentDayInCycle}.`);
+  }
   console.log(`  Current day after restart: ${restartState.currentDayInCycle}`);
   console.log(`  Current stage history length: ${restartState.stageHistory.length}`);
-  console.log(`  Progress text: ${await page.locator('.journey-progress__value').textContent()}`);
+  console.log(`  Primary action after restart: ${await readPrimaryActionLabel(page)}`);
 }
 
 async function runStayFlow(page) {
@@ -662,13 +700,13 @@ async function runStayFlow(page) {
   await page.goto(`${BASE}/#/active-plan/plan_stay`, { waitUntil: "networkidle" });
   await takeScreenshot(page, "11-stay-detail-initial");
 
-  await click(page.locator('[data-action="apd-resume"]'));
+  await clickPrimaryAction(page, /start workout/i);
   await startPlayer(page);
   await finishSingleSetSession(page, { reps: 5 });
   await finishReflection(page, "normal");
 
   await page.waitForURL(/#\/active-plan\/plan_stay/, { timeout: 5000 });
-  await click(page.locator('[data-action="apd-test"]'));
+  await clickPrimaryAction(page, /take milestone test/i);
   await startPlayer(page);
   await takeScreenshot(page, "12-stay-test-active");
   await finishSingleSetSession(page, { reps: 1 });
@@ -678,8 +716,15 @@ async function runStayFlow(page) {
   await page.waitForURL(/#\/active-plan\/plan_stay/, { timeout: 5000 });
   await takeScreenshot(page, "14-stay-detail-after-choice");
   const stayState = await readActivePlanState(page, "plan_stay");
+  if (stayState.currentStageIndex !== 0) {
+    throw new Error(`Stay flow should remain in stage 1, but currentStageIndex is ${stayState.currentStageIndex}.`);
+  }
+  const postStayLabel = await readPrimaryActionLabel(page);
+  if (!/advance to/i.test(postStayLabel)) {
+    throw new Error(`Stay flow should leave an advance choice on detail, but primary action is "${postStayLabel}".`);
+  }
   console.log(`  Current stage after stay choice: ${stayState.currentStageIndex}`);
-  console.log(`  Advance CTA visible: ${await page.locator('[data-action="apd-advance"]').isVisible()}`);
+  console.log(`  Primary action after stay choice: ${postStayLabel}`);
 }
 
 async function runDemotionFlow(page) {
@@ -687,7 +732,7 @@ async function runDemotionFlow(page) {
   await page.goto(`${BASE}/#/active-plan/plan_demote`, { waitUntil: "networkidle" });
   await takeScreenshot(page, "15-demote-detail-initial");
 
-  await click(page.locator('[data-action="apd-test"]'));
+  await clickPrimaryAction(page, /take milestone test/i);
   await startPlayer(page);
   await takeScreenshot(page, "16-demote-test-active");
   await finishSingleSetSession(page, { reps: 5, weight: 90 });
@@ -696,8 +741,11 @@ async function runDemotionFlow(page) {
   await page.waitForURL(/#\/active-plan\/plan_demote/, { timeout: 5000 });
   await takeScreenshot(page, "17-demote-detail-after-fail");
   const demoteState = await readActivePlanState(page, "plan_demote");
+  if (demoteState.currentStageIndex !== 0) {
+    throw new Error(`Demotion flow should move back to stage 1, but currentStageIndex is ${demoteState.currentStageIndex}.`);
+  }
   console.log(`  Current stage after demotion: ${demoteState.currentStageIndex}`);
-  console.log(`  Current stage label: ${await page.locator('.journey-hero__stage').textContent()}`);
+  console.log(`  Primary action after demotion: ${await readPrimaryActionLabel(page)}`);
 }
 
 async function runRestAndDurationFlow(page) {
@@ -705,12 +753,16 @@ async function runRestAndDurationFlow(page) {
   await page.goto(`${BASE}/#/active-plan/plan_rest`, { waitUntil: "networkidle" });
   await takeScreenshot(page, "18-rest-detail-initial");
 
-  await click(page.locator('[data-action="apd-resume"]'));
+  await clickPrimaryAction(page, /complete rest step/i);
   await waitForApp(page);
   await takeScreenshot(page, "19-rest-detail-after-complete");
-  console.log(`  Resume CTA after rest: ${await page.locator('[data-action="apd-resume"]').textContent()}`);
+  const postRestLabel = await readPrimaryActionLabel(page);
+  if (!/start workout/i.test(postRestLabel)) {
+    throw new Error(`Rest flow should expose the routine after the rest step, but primary action is "${postRestLabel}".`);
+  }
+  console.log(`  Primary action after rest: ${postRestLabel}`);
 
-  await click(page.locator('[data-action="apd-resume"]'));
+  await clickPrimaryAction(page, /start workout/i);
   await startPlayer(page);
   await takeScreenshot(page, "20-duration-session-active");
   console.log(`  Duration input visible: ${await page.locator('#log-duration').isVisible()}`);
@@ -721,6 +773,9 @@ async function runRestAndDurationFlow(page) {
   await page.waitForURL(/#\/active-plan\/plan_rest/, { timeout: 5000 });
   await takeScreenshot(page, "22-rest-detail-after-duration");
   const restState = await readActivePlanState(page, "plan_rest");
+  if (restState.currentCycleCount < 1) {
+    throw new Error(`Duration flow should increase cycle count, but currentCycleCount is ${restState.currentCycleCount}.`);
+  }
   console.log(`  Current cycle count after duration flow: ${restState.currentCycleCount}`);
 }
 

@@ -219,7 +219,7 @@ async function readState(page) {
 }
 
 async function runWorkoutSession(page) {
-  await forceClick(page.locator('[data-action="apd-resume"]'));
+  await forceClick(page.locator('[data-action="apd-primary"], [data-action="apd-resume"]'));
   await page.waitForURL(/#\/workout-player\/active_ready_plan/);
 
   const startButton = page.locator('[data-action="start"]');
@@ -298,8 +298,8 @@ if ((bootState.plans.plan_blueprints || []).length !== 1 || bootState.plans.plan
 if ((bootState.routines.routines || []).length !== 2 || (bootState.exercises.exercises || []).length !== 2) {
   throw new Error("Library state was unexpectedly reseeded or replaced during boot.");
 }
-if ((bootState.plans.plan_blueprints || []).some((plan) => plan.id === "plan_master_rehab_strength")) {
-  throw new Error("Master-seed blueprint should not be auto-injected over existing local data.");
+if ((bootState.plans.plan_blueprints || []).some((plan) => plan.id === "plan_grounded_strength_path")) {
+  throw new Error("Starter blueprints should not be auto-injected over existing local data.");
 }
 
 await page.goto(`${BASE}/#/active-plan/active_ready_plan`, { waitUntil: "networkidle" });
@@ -370,7 +370,7 @@ if (activePlan.currentDayInCycle !== 2) {
   throw new Error("Revision import should preserve the mapped current day when stage mapping is clean.");
 }
 
-await forceClick(page.locator('[data-action="apd-resume"]'));
+await forceClick(page.locator('[data-action="apd-primary"], [data-action="apd-resume"]'));
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${OUT_DIR}/06-after-rest-complete.png`, fullPage: true });
 

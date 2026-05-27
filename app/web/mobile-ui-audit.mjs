@@ -80,6 +80,22 @@ const exercises = [
     whyItHelps: "Adds leg volume without complicating setup.",
     isCustom: false,
   },
+  {
+    id: "ex_box_breathing",
+    slug: "box-breathing",
+    name: "Box Breathing",
+    description: "Four-step breath pacing practice for settling attention and building smoother recovery between efforts.",
+    type: "mental",
+    trackingType: "duration",
+    bodyTargets: [],
+    equipment: ["None"],
+    cues: ["Breathe through the nose", "Keep the pace even"],
+    restSeconds: 0,
+    aliases: ["4-4-4-4 Breathing"],
+    movementPattern: "breathwork",
+    whyItHelps: "Makes the detail surface prove itself on a non-body-target practice too.",
+    isCustom: false,
+  },
 ];
 
 const routines = [
@@ -381,7 +397,12 @@ async function getMetrics(page) {
 }
 
 async function visibleBox(locator) {
-  await locator.waitFor({ state: "visible", timeout: 5000 });
+  try {
+    await locator.waitFor({ state: "visible", timeout: 5000 });
+  } catch {
+    return null;
+  }
+
   const box = await locator.boundingBox();
   if (!box) {
     return null;
@@ -401,6 +422,101 @@ async function logScrollState(page, label) {
   const horizontalOverflow = metrics.scrollWidth > metrics.clientWidth + 1;
   console.log(`  ${label}: ${scrollable ? "scrollable" : "fits on one screen"} / horizontal overflow: ${horizontalOverflow ? "yes" : "no"}`);
   return { scrollable, horizontalOverflow, metrics };
+}
+
+function expectCondition(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+async function assertActivePlanIndex(page, label) {
+  const homeCards = page.locator(".plan-card--index");
+  expectCondition(await homeCards.count() > 0, `${label}: expected active plan index cards`);
+  const firstText = await homeCards.first().textContent().catch(() => "");
+  expectCondition(/Current stage/i.test(firstText || ""), `${label}: expected compare-first runtime facts`);
+  expectCondition(!/STEP\s+\d+\s+OF\s+\d+/i.test(firstText || ""), `${label}: index cards should not repeat a second progress bar label`);
+  expectCondition(!/Day 1/i.test(firstText || ""), `${label}: active plan index should use step-based language`);
+}
+
+async function assertBlueprintListCompareCards(page, label) {
+  const listCard = page.locator(".plan-card--blueprint").first();
+  await listCard.waitFor({ state: "visible", timeout: 5000 });
+  const cardText = await listCard.textContent().catch(() => "");
+  expectCondition(/Best for/i.test(cardText || ""), `${label}: expected compare-first blueprint guidance`);
+  expectCondition(/Why choose this plan/i.test(cardText || ""), `${label}: expected blueprint goal framing`);
+  expectCondition(/Opening cycle/i.test(cardText || ""), `${label}: expected lightweight opening-cycle hint`);
+  expectCondition(!/Starts with/i.test(cardText || ""), `${label}: blueprint list should not repeat opening-stage labels`);
+  expectCondition(await listCard.locator(".plan-card__journey-preview .journey-node").count() === 0, `${label}: blueprint list should not show full opening-stage nodes`);
+  expectCondition(await listCard.locator('[data-action="open-routine"]').count() === 0, `${label}: blueprint list should keep opening-cycle hints static`);
+}
+async function assertCompactJourneyPreview(page, label) {
+  const pathPanel = page.locator("section.panel").filter({ hasText: "Later stages" }).first();
+  await pathPanel.waitFor({ state: "visible", timeout: 5000 });
+  const nodeCount = await pathPanel.locator(".journey-node").count();
+  expectCondition(nodeCount > 0, `${label}: expected journey preview nodes`);
+  const sequenceCount = await pathPanel.locator(".journey-sequence").count();
+  const estimateCount = await pathPanel.locator(".journey-node__estimate").count();
+  const objectiveCount = await pathPanel.locator(".journey-node__desc").count();
+  const affordanceCount = await pathPanel.locator(".journey-node__affordance--navigate").count();
+  const selectAffordanceCount = await pathPanel.locator(".journey-node__affordance--select").count();
+  expectCondition(sequenceCount === 0, `${label}: path preview should not show sequence strips`);
+  expectCondition(estimateCount === 0, `${label}: path preview should not show cycle estimates`);
+  expectCondition(objectiveCount >= Math.max(0, nodeCount - 1), `${label}: light path preview should keep later-stage goal cues without duplicating the owner module`);
+  expectCondition(affordanceCount === nodeCount, `${label}: every preview node should advertise navigation`);
+  expectCondition(selectAffordanceCount === 0, `${label}: detail-path preview nodes should not look like in-place stage selectors`);
+}
+
+async function assertRoadmapTapSelectsStage(page, label, actionName) {
+  const stageNodes = page.locator(`[data-action="${actionName}"]`);
+  const nodeCount = await stageNodes.count();
+  expectCondition(nodeCount > 0, `${label}: expected at least one tappable roadmap node`);
+  const target = stageNodes.nth(Math.max(0, nodeCount - 1));
+  const expectedTitle = (await target.locator(".journey-node__title").textContent().catch(() => "")).trim();
+  await target.click();
+  await page.waitForTimeout(600);
+  const selectedTitle = (await page.locator(".journey-node--selected .journey-node__title").first().textContent().catch(() => "")).trim();
+  expectCondition(Boolean(expectedTitle && selectedTitle && selectedTitle.includes(expectedTitle)), `${label}: tapping a roadmap node should open Study with that stage selected`);
+}
+
+async function assertMobileStudyInlineExpansion(page, label) {
+  const selectedNode = page.locator(".journey-node--selected").first();
+  await selectedNode.waitFor({ state: "visible", timeout: 5000 });
+  expectCondition(await selectedNode.locator(".journey-node__affordance--select").count() > 0, `${label}: study stage nodes should advertise in-place selection, not navigation`);
+  const inlineDetail = selectedNode.locator(".journey-node__detail--inline");
+  expectCondition(await inlineDetail.isVisible(), `${label}: selected node should expand inline on mobile`);
+  expectCondition(!(await page.locator(".study-map__detail").isVisible().catch(() => false)), `${label}: separate study detail pane should be hidden on mobile`);
+  const inlineText = await inlineDetail.textContent().catch(() => "");
+  expectCondition(!/Selected stage schedule/i.test(inlineText || ""), `${label}: inline expansion should not restart with a schedule sub-header`);
+  expectCondition(!/Milestone gate/i.test(inlineText || ""), `${label}: inline expansion should not repeat milestone blocks`);
+  expectCondition(await inlineDetail.locator(".stage-step-preview__routine").count() === 0, `${label}: inline schedule should stay script-like, not expand routine previews`);
+  expectCondition(await selectedNode.locator(".journey-sequence").count() === 0, `${label}: selected stage nodes should not show routine chips in compact form`);
+  expectCondition(await selectedNode.locator(".journey-node__desc").count() > 0, `${label}: selected stage node should summarize the stage goal`);
+  expectCondition(await inlineDetail.locator(".study-schedule__nav").count() > 0, `${label}: routine rows should show a navigation affordance`);
+}
+
+async function assertBlueprintEditorStageStructure(page, label) {
+  const stageList = page.locator(".stage-list--editor").first();
+  await stageList.waitFor({ state: "visible", timeout: 5000 });
+  expectCondition(await stageList.locator(".journey-node").count() > 0, `${label}: expected stage preview nodes in the editor`);
+  const stageText = await stageList.locator(".stage-list__item--preview").first().textContent().catch(() => "");
+  expectCondition(/Stage 1/i.test(stageText || ""), `${label}: expected stage numbering in stage previews`);
+  expectCondition(!/~\d+\s*min active/i.test(stageText || ""), `${label}: stage previews should leave process timing to the detailed script`);
+  const editorText = await page.locator('.editor-shell').textContent().catch(() => '');
+  expectCondition(/Why someone should start this blueprint/i.test(editorText || ""), `${label}: expected explicit blueprint adoption thesis input`);
+  expectCondition(/Who this blueprint is for/i.test(editorText || ""), `${label}: expected explicit blueprint audience input`);
+}
+
+async function assertStageEditorBuilder(page, label) {
+  const preview = page.locator(".stage-preview-panel").first();
+  await preview.waitFor({ state: "visible", timeout: 5000 });
+  const previewText = await preview.textContent().catch(() => "");
+  expectCondition(/How this stage will read/i.test(previewText || ""), `${label}: expected live stage preview`);
+  expectCondition(/Step 1/i.test(previewText || ""), `${label}: expected step-based preview language`);
+  const editorText = await page.locator(".stage-editor-shell").textContent().catch(() => "");
+  expectCondition(/Ordered steps/i.test(editorText || ""), `${label}: expected ordered step builder heading`);
+  expectCondition(!/Day 1/i.test(editorText || ""), `${label}: stage editor should not use day-based language`);
+  expectCondition(/Session check-ins/i.test(editorText || ""), `${label}: stage editor should expose session check-ins separately from the milestone gate`);
 }
 
 async function seedLocalStorage(page) {
@@ -453,9 +569,25 @@ async function main() {
   await page.locator('[data-action="plan-card"]').first().click();
   await page.waitForTimeout(700);
   await capture(page, "02-active-plan-detail");
-  const detailCtaBox = await visibleBox(page.locator('[data-action="apd-resume"]'));
+  const detailCtaBox = await visibleBox(page.locator('[data-action="apd-primary"]'));
+  const detailProgressBox = await visibleBox(page.locator('.journey-progress--secondary'));
   console.log(`  active plan CTA bottom: ${detailCtaBox?.bottom ?? "hidden"}`);
+  console.log(`  active plan progress top: ${detailProgressBox?.top ?? "hidden"}`);
   await logScrollState(page, "Active plan detail");
+  expectCondition(detailCtaBox, "Active plan detail: expected visible primary CTA on mobile");
+  expectCondition(!detailProgressBox, "Active plan detail: standalone progress slab should be removed once progress is folded into the current node");
+  const nowMetaText = await page.locator('.journey-now-card__meta').textContent().catch(() => '');
+  expectCondition(!/Stage\s+\d+\s+of\s+\d+/i.test(nowMetaText || ''), "Active plan detail: stage position should not sit as a separate meta row below the node");
+  await assertCompactJourneyPreview(page, "Active plan detail");
+  expectCondition(await page.locator('.journey-now-card .journey-sequence').count() === 0, "Active plan detail: current-stage card should keep process out of the compact runtime block");
+  await assertRoadmapTapSelectsStage(page, "Active plan detail", "open-active-plan-study");
+  await page.goBack();
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="study-plan"]').click();
+  await page.waitForTimeout(700);
+  await capture(page, "02b-active-plan-study");
+  await logScrollState(page, "Active plan study");
+  await assertMobileStudyInlineExpansion(page, "Active plan study");
 
   console.log("\n=== 2. Exercise Library ===");
   await page.goto(`${BASE}/#/exercises`, { waitUntil: "networkidle" });
@@ -464,26 +596,40 @@ async function main() {
   await logScrollState(page, "Exercise list");
   console.log(`  cards: ${await page.locator(".plan-card").count()}`);
   console.log(`  import visible: ${await page.locator('[data-action="import-exercises"]').isVisible()}`);
-  await page.locator('[data-action="select-exercise"]').last().scrollIntoViewIfNeeded();
+  await page.locator('[data-action="exercise-card"]').last().scrollIntoViewIfNeeded();
   await page.waitForTimeout(250);
   await capture(page, "04-exercises-bottom");
-  await page.locator('[data-action="select-exercise"]').first().click();
+  await page.locator('[data-action="exercise-card"]').first().click();
   await page.waitForTimeout(500);
   await capture(page, "05-exercise-detail");
   await logScrollState(page, "Exercise detail");
+
+  await page.goto(`${BASE}/#/exercises`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="exercise-card"]').filter({ hasText: "Box Breathing" }).first().click();
+  await page.waitForTimeout(500);
+  await capture(page, "05b-exercise-detail-mental");
+  await logScrollState(page, "Exercise detail (mental)");
 
   console.log("\n=== 3. Routine Library ===");
   await page.goto(`${BASE}/#/routines`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
   await capture(page, "06-routines-list");
   await logScrollState(page, "Routine list");
-  await page.locator('[data-action="select-routine"]').first().click();
+  await page.locator('[data-action="open-routine"]').first().click();
+  await page.waitForTimeout(600);
+  const editRoutineButton = page.locator('[data-action="edit-routine"]');
+  await editRoutineButton.scrollIntoViewIfNeeded();
+  await editRoutineButton.evaluate((element) => element.click());
   await page.waitForTimeout(600);
   await capture(page, "07-routine-editor-top");
-  const routineSaveInitial = await visibleBox(page.locator('[data-action="save-routine"]'));
+  const routineSaveButton = page.locator('[data-action="save-routine"]');
+  const routineSaveInitial = (await routineSaveButton.isVisible().catch(() => false))
+    ? await visibleBox(routineSaveButton)
+    : null;
   console.log(`  save routine initial bottom: ${routineSaveInitial?.bottom ?? "hidden"}`);
   await logScrollState(page, "Routine editor");
-  await page.locator('[data-action="save-routine"]').scrollIntoViewIfNeeded();
+  await routineSaveButton.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await capture(page, "08-routine-editor-bottom");
 
@@ -498,6 +644,19 @@ async function main() {
   const startPlanBox = await visibleBox(page.locator('[data-action="start-plan"]'));
   console.log(`  start plan button visible bottom: ${startPlanBox?.bottom ?? "hidden"}`);
   await logScrollState(page, "Plan detail");
+  await assertCompactJourneyPreview(page, "Blueprint detail");
+  expectCondition(await page.locator('.plan-card__journey-preview .journey-sequence').count() === 0, "Blueprint detail: opening-stage preview should stay compact and goal-first");
+  await assertRoadmapTapSelectsStage(page, "Blueprint detail", "open-blueprint-study");
+  await page.goBack();
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="study-blueprint"]').click();
+  await page.waitForTimeout(700);
+  await capture(page, "10b-plan-study");
+  await logScrollState(page, "Blueprint study");
+  await assertMobileStudyInlineExpansion(page, "Blueprint study");
+
+  await page.goto(`${BASE}/#/plans`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
   await page.locator('[data-action="edit-blueprint"]').click();
   await page.waitForTimeout(600);
   await capture(page, "11-blueprint-editor");
@@ -514,13 +673,37 @@ async function main() {
   await page.waitForTimeout(600);
   await capture(page, "13-workouts");
   await logScrollState(page, "Workout history");
+  expectCondition(await page.locator('.history-week-rail').count() === 1, "Workout history: expected week strip calendar rail to render");
   const detailBox = await visibleBox(page.locator('[data-role="workout-detail"]'));
   const listBox = await visibleBox(page.locator('[data-role="workout-list"]'));
-  console.log(`  detail above list on mobile: ${detailBox.top < listBox.top}`);
-  await page.locator('[data-action="select-workout"]').nth(1).click();
+  expectCondition(Boolean(detailBox && listBox && listBox.top < detailBox.top), "Workout history: expected list/picker before selected detail on mobile");
+  console.log(`  list above detail on mobile: ${listBox.top < detailBox.top}`);
+
+  let workoutButtons = page.locator('[data-action="select-workout"]');
+  let workoutButtonCount = await workoutButtons.count();
+  if (workoutButtonCount < 2) {
+    const alternateDate = await page.locator('[data-action="select-history-date"]').evaluateAll((buttons) => {
+      return buttons
+        .map((button) => ({
+          date: button.getAttribute("data-date"),
+          selected: button.classList.contains("is-selected"),
+          empty: !!button.querySelector(".history-week-rail__marker--empty"),
+        }))
+        .find((button) => !button.selected && !button.empty)?.date || null;
+    });
+    if (alternateDate) {
+      await page.locator(`[data-action="select-history-date"][data-date="${alternateDate}"]`).click();
+      await page.waitForTimeout(700);
+      workoutButtons = page.locator('[data-action="select-workout"]');
+      workoutButtonCount = await workoutButtons.count();
+    }
+  }
+
+  expectCondition(workoutButtonCount > 0, "Workout history: expected at least one visible session in the selected day slice");
+  await workoutButtons.nth(Math.min(1, workoutButtonCount - 1)).click();
   await page.waitForTimeout(900);
   await capture(page, "14-workouts-second-selection");
-  console.log(`  scrollY after selecting second workout: ${await page.evaluate(() => window.scrollY)}`);
+  console.log(`  scrollY after selecting follow-up workout: ${await page.evaluate(() => window.scrollY)}`);
 
   console.log("\n=== Summary ===");
   if (consoleIssues.length === 0) {
@@ -539,3 +722,14 @@ main().catch((error) => {
   console.error("FAILED:", error);
   process.exit(1);
 });
+
+
+
+
+
+
+
+
+
+
+

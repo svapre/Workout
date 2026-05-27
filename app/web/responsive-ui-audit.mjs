@@ -86,6 +86,22 @@ const exercises = [
     whyItHelps: "Adds leg volume without complicating setup.",
     isCustom: false,
   },
+  {
+    id: "ex_box_breathing",
+    slug: "box-breathing",
+    name: "Box Breathing",
+    description: "Four-step breath pacing practice for settling attention and building smoother recovery between efforts.",
+    type: "mental",
+    trackingType: "duration",
+    bodyTargets: [],
+    equipment: ["None"],
+    cues: ["Breathe through the nose", "Keep the pace even"],
+    restSeconds: 0,
+    aliases: ["4-4-4-4 Breathing"],
+    movementPattern: "breathwork",
+    whyItHelps: "Makes the compact/detail contract prove itself on a non-body-target practice too.",
+    isCustom: false,
+  },
 ];
 
 const routines = [
@@ -389,7 +405,12 @@ async function getMetrics(page) {
 }
 
 async function visibleBox(locator) {
-  await locator.waitFor({ state: "visible", timeout: 5000 });
+  try {
+    await locator.waitFor({ state: "visible", timeout: 5000 });
+  } catch {
+    return null;
+  }
+
   const box = await locator.boundingBox();
   if (!box) return null;
   return {
@@ -406,6 +427,126 @@ async function logScrollState(page, label) {
   const horizontalOverflow = metrics.scrollWidth > metrics.clientWidth + 1;
   log(`  ${label}: ${scrollable ? "scrollable" : "fits"} / horizontal overflow: ${horizontalOverflow ? "yes" : "no"}`);
   return { scrollable, horizontalOverflow, metrics };
+}
+
+function expectCondition(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+async function assertActivePlanIndex(page, label, expectBoard) {
+  const homeCards = page.locator(".plan-card--index");
+  expectCondition(await homeCards.count() > 0, `${label}: expected active plan index cards`);
+  const firstText = await homeCards.first().textContent().catch(() => "");
+  expectCondition(/Current stage/i.test(firstText || ""), `${label}: expected compare-first runtime facts`);
+  expectCondition(!/STEP\s+\d+\s+OF\s+\d+/i.test(firstText || ""), `${label}: index cards should not repeat a second progress bar label`);
+  expectCondition(!/Day 1/i.test(firstText || ""), `${label}: active plan index should use step-based language`);
+  if (expectBoard) {
+    const sections = page.locator(".dashboard-section--panel");
+    expectCondition(await sections.count() >= 2, `${label}: expected split dashboard panels when multiple plan buckets exist`);
+  }
+}
+
+async function assertBlueprintListCompareCards(page, label) {
+  const listCard = page.locator(".plan-card--blueprint").first();
+  await listCard.waitFor({ state: "visible", timeout: 5000 });
+  const cardText = await listCard.textContent().catch(() => "");
+  expectCondition(/Best for/i.test(cardText || ""), `${label}: expected compare-first blueprint guidance`);
+  expectCondition(/Why choose this plan/i.test(cardText || ""), `${label}: expected blueprint goal framing`);
+  expectCondition(/Opening cycle/i.test(cardText || ""), `${label}: expected lightweight opening-cycle hint`);
+  expectCondition(!/Starts with/i.test(cardText || ""), `${label}: blueprint list should not repeat opening-stage labels`);
+  expectCondition(await listCard.locator(".plan-card__journey-preview .journey-node").count() === 0, `${label}: blueprint list should not show full opening-stage nodes`);
+  expectCondition(await listCard.locator('[data-action="open-routine"]').count() === 0, `${label}: blueprint list should keep opening-cycle hints static`);
+}
+async function assertCompactJourneyPreview(page, label) {
+  const pathPanel = page.locator("section.panel").filter({ hasText: "Later stages" }).first();
+  await pathPanel.waitFor({ state: "visible", timeout: 5000 });
+  const nodeCount = await pathPanel.locator(".journey-node").count();
+  expectCondition(nodeCount > 0, `${label}: expected journey preview nodes`);
+  const sequenceCount = await pathPanel.locator(".journey-sequence").count();
+  const estimateCount = await pathPanel.locator(".journey-node__estimate").count();
+  const objectiveCount = await pathPanel.locator(".journey-node__desc").count();
+  const affordanceCount = await pathPanel.locator(".journey-node__affordance--navigate").count();
+  const selectAffordanceCount = await pathPanel.locator(".journey-node__affordance--select").count();
+  expectCondition(sequenceCount === 0, `${label}: path preview should not show sequence strips`);
+  expectCondition(estimateCount === 0, `${label}: path preview should not show cycle estimates`);
+  expectCondition(objectiveCount >= Math.max(0, nodeCount - 1), `${label}: light path preview should keep later-stage goal cues without duplicating the owner module`);
+  expectCondition(affordanceCount === nodeCount, `${label}: every preview node should advertise navigation`);
+  expectCondition(selectAffordanceCount === 0, `${label}: detail-path preview nodes should not look like in-place stage selectors`);
+}
+
+async function assertRoadmapTapSelectsStage(page, label, actionName) {
+  const stageNodes = page.locator(`[data-action="${actionName}"]`);
+  const nodeCount = await stageNodes.count();
+  expectCondition(nodeCount > 0, `${label}: expected at least one tappable roadmap node`);
+  const target = stageNodes.nth(Math.max(0, nodeCount - 1));
+  const expectedTitle = (await target.locator(".journey-node__title").textContent().catch(() => "")).trim();
+  await target.click();
+  await page.waitForTimeout(600);
+  const selectedTitle = (await page.locator(".journey-node--selected .journey-node__title").first().textContent().catch(() => "")).trim();
+  expectCondition(Boolean(expectedTitle && selectedTitle && selectedTitle.includes(expectedTitle)), `${label}: tapping a roadmap node should open Study with that stage selected`);
+}
+
+async function assertStudyExpansionMode(page, label, expectInline) {
+  const selectedNode = page.locator(".journey-node--selected").first();
+  await selectedNode.waitFor({ state: "visible", timeout: 5000 });
+  expectCondition(await selectedNode.locator(".journey-node__affordance--select").count() > 0, `${label}: study stage nodes should advertise in-place selection, not navigation`);
+  const inlineDetail = selectedNode.locator(".journey-node__detail--inline");
+  const inlineVisible = await inlineDetail.isVisible().catch(() => false);
+  const paneVisible = await page.locator(".study-map__detail").isVisible().catch(() => false);
+  if (expectInline) {
+    expectCondition(inlineVisible, `${label}: selected node should expand inline at this viewport`);
+    expectCondition(!paneVisible, `${label}: separate study detail pane should be hidden at this viewport`);
+    const inlineText = await inlineDetail.textContent().catch(() => "");
+    expectCondition(!/Selected stage schedule/i.test(inlineText || ""), `${label}: inline expansion should not restart with a schedule sub-header`);
+    expectCondition(!/Milestone gate/i.test(inlineText || ""), `${label}: inline expansion should not repeat milestone blocks`);
+    expectCondition(await inlineDetail.locator(".stage-step-preview__routine").count() === 0, `${label}: inline schedule should stay script-like, not expand routine previews`);
+    expectCondition(await selectedNode.locator(".journey-sequence").count() === 0, `${label}: selected stage nodes should not show routine chips in compact form`);
+    expectCondition(await selectedNode.locator(".journey-node__desc").count() > 0, `${label}: selected stage node should summarize the stage goal`);
+    expectCondition(await inlineDetail.locator(".study-schedule__nav").count() > 0, `${label}: routine rows should show a navigation affordance`);
+  } else {
+    expectCondition(!inlineVisible, `${label}: inline selected-stage detail should be hidden at this viewport`);
+    expectCondition(paneVisible, `${label}: separate study detail pane should be visible at this viewport`);
+    const stagesBox = await visibleBox(page.locator(".study-map__stages"));
+    const paneBox = await visibleBox(page.locator(".study-map__detail"));
+    expectCondition(Boolean(stagesBox && paneBox), `${label}: expected visible study rail and detail pane boxes`);
+    expectCondition(paneBox.left >= stagesBox.right - 24, `${label}: desktop detail pane should sit beside the rail, not below it`);
+    expectCondition(paneBox.top < stagesBox.bottom - 40, `${label}: desktop detail pane should begin within the rail band, not after it`);
+    expectCondition(await selectedNode.locator(".journey-sequence").count() === 0, `${label}: selected stage nodes should keep process in the detail pane`);
+    expectCondition(await selectedNode.locator(".journey-node__desc").count() > 0, `${label}: selected stage node should summarize the stage goal`);
+    expectCondition(await page.locator(".study-map__detail .study-schedule__nav").count() > 0, `${label}: routine rows should show a navigation affordance`);
+  }
+}
+
+async function assertBlueprintEditorStageStructure(page, label) {
+  const stageList = page.locator(".stage-list--editor").first();
+  await stageList.waitFor({ state: "visible", timeout: 5000 });
+  expectCondition(await stageList.locator(".journey-node").count() > 0, `${label}: expected stage preview nodes in the editor`);
+  const stageText = await stageList.locator(".stage-list__item--preview").first().textContent().catch(() => "");
+  expectCondition(/Stage 1/i.test(stageText || ""), `${label}: expected stage numbering in stage previews`);
+  expectCondition(!/~\d+\s*min active/i.test(stageText || ""), `${label}: stage previews should leave process timing to the detailed script`);
+  const editorText = await page.locator('.editor-shell').textContent().catch(() => '');
+  expectCondition(/Why someone should start this blueprint/i.test(editorText || ""), `${label}: expected explicit blueprint adoption thesis input`);
+  expectCondition(/Who this blueprint is for/i.test(editorText || ""), `${label}: expected explicit blueprint audience input`);
+}
+
+async function assertStageEditorBuilder(page, label, expectSplit) {
+  const preview = page.locator(".stage-preview-panel").first();
+  await preview.waitFor({ state: "visible", timeout: 5000 });
+  const previewText = await preview.textContent().catch(() => "");
+  expectCondition(/How this stage will read/i.test(previewText || ""), `${label}: expected live stage preview`);
+  expectCondition(/Step 1/i.test(previewText || ""), `${label}: expected step-based preview language`);
+  const editorText = await page.locator(".stage-editor-shell").textContent().catch(() => "");
+  expectCondition(/Ordered steps/i.test(editorText || ""), `${label}: expected ordered step builder heading`);
+  expectCondition(!/Day 1/i.test(editorText || ""), `${label}: stage editor should not use day-based language`);
+  expectCondition(/Session check-ins/i.test(editorText || ""), `${label}: stage editor should expose session check-ins separately from the milestone gate`);
+  if (expectSplit) {
+    const sidebarBox = await visibleBox(page.locator(".stage-editor-sidebar"));
+    const mainBox = await visibleBox(page.locator(".stage-editor-main"));
+    expectCondition(Boolean(sidebarBox && mainBox), `${label}: expected visible stage editor sidebar and main panes`);
+    expectCondition(mainBox.left >= sidebarBox.right - 24, `${label}: stage preview should sit beside the authoring pane at this viewport`);
+  }
 }
 
 async function seedLocalStorage(page) {
@@ -470,41 +611,88 @@ async function runViewportAudit(browser, config) {
   await page.waitForTimeout(600);
   await capture(page, `${config.id}-02-active-plan-detail`);
   const detailScroll = await logScrollState(page, "Active plan detail");
-  const activeCta = await visibleBox(page.locator('[data-action="apd-resume"]'));
+  const activeCta = await visibleBox(page.locator('[data-action="apd-primary"], [data-action="apd-resume"]'));
+  const activeProgress = await visibleBox(page.locator('.journey-progress--secondary'));
   log(`  active plan CTA bottom: ${activeCta?.bottom ?? "hidden"} / clientHeight: ${detailScroll.metrics.clientHeight}`);
+  log(`  active plan progress top: ${activeProgress?.top ?? "hidden"}`);
+  expectCondition(activeCta, `Active plan detail (${config.id}): expected visible primary CTA`);
+  expectCondition(!activeProgress, `Active plan detail (${config.id}): standalone progress slab should be removed once progress is folded into the current node`);
+  const activeNowMeta = await page.locator('.journey-now-card__meta').textContent().catch(() => '');
+  expectCondition(!/Stage\s+\d+\s+of\s+\d+/i.test(activeNowMeta || ''), `Active plan detail (${config.id}): stage position should not sit as a separate meta row below the node`);
+  await assertCompactJourneyPreview(page, `Active plan detail (${config.id})`);
+  expectCondition(await page.locator('.journey-now-card .journey-sequence').count() === 0, `Active plan detail (${config.id}): current-stage card should keep process out of the compact runtime block`);
+  await assertRoadmapTapSelectsStage(page, `Active plan detail (${config.id})`, 'open-active-plan-study');
+  await page.goBack();
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="study-plan"]').click();
+  await page.waitForTimeout(600);
+  await capture(page, `${config.id}-02b-active-plan-study`);
+  await logScrollState(page, "Active plan study");
+  await assertStudyExpansionMode(page, `Active plan study (${config.id})`, config.viewport.width < 960);
 
   await page.goto(`${BASE}/#/routines`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
-  await page.locator('[data-action="select-routine"]').first().click();
+  await page.locator('[data-action="open-routine"]').first().click();
   await page.waitForTimeout(600);
-  await capture(page, `${config.id}-03-routine-editor`);
-  await logScrollState(page, "Routine editor");
+  await capture(page, `${config.id}-03-routine-detail`);
+  await logScrollState(page, "Routine detail");
+
+  await page.goto(`${BASE}/#/exercises`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  await capture(page, `${config.id}-04-exercise-library`);
+  await logScrollState(page, "Exercise library");
+  await page.locator('[data-action="exercise-card"]').first().click();
+  await page.waitForTimeout(600);
+  await capture(page, `${config.id}-05-exercise-detail`);
+  await logScrollState(page, "Exercise detail");
+
+  await page.goto(`${BASE}/#/exercises`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="exercise-card"]').filter({ hasText: "Box Breathing" }).first().click();
+  await page.waitForTimeout(600);
+  await capture(page, `${config.id}-05b-exercise-detail-mental`);
+  await logScrollState(page, "Exercise detail (mental)");
 
   await page.goto(`${BASE}/#/plans`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   await page.locator('[data-action="select-plan"]').first().click();
   await page.waitForTimeout(500);
-  await capture(page, `${config.id}-04-plan-detail`);
+  await capture(page, `${config.id}-06-plan-detail`);
   await logScrollState(page, "Plan detail");
+  await assertCompactJourneyPreview(page, `Blueprint detail (${config.id})`);
+  expectCondition(await page.locator('.plan-card__journey-preview .journey-sequence').count() === 0, `Blueprint detail (${config.id}): opening-stage preview should stay compact and goal-first`);
+  await assertRoadmapTapSelectsStage(page, `Blueprint detail (${config.id})`, 'open-blueprint-study');
+  await page.goBack();
+  await page.waitForTimeout(500);
+  await page.locator('[data-action="study-blueprint"]').click();
+  await page.waitForTimeout(600);
+  await capture(page, `${config.id}-06b-plan-study`);
+  await logScrollState(page, "Blueprint study");
+  await assertStudyExpansionMode(page, `Blueprint study (${config.id})`, config.viewport.width < 960);
+
+  await page.goto(`${BASE}/#/plans`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
 
   if (!config.desktopSmokeOnly) {
     await page.locator('[data-action="edit-blueprint"]').click();
     await page.waitForTimeout(500);
-    await capture(page, `${config.id}-05-blueprint-editor`);
+    await capture(page, `${config.id}-07-blueprint-editor`);
+    await assertBlueprintEditorStageStructure(page, `Blueprint editor (${config.id})`);
     await logScrollState(page, "Blueprint editor");
     await page.locator('[data-action="edit-stage"]').first().click();
     await page.waitForTimeout(500);
-    await capture(page, `${config.id}-06-stage-editor`);
+    await capture(page, `${config.id}-08-stage-editor`);
+    await assertStageEditorBuilder(page, `Stage editor (${config.id})`, config.viewport.width > 980);
     await logScrollState(page, "Stage editor");
 
     await page.goto(`${BASE}/#/workouts`, { waitUntil: "networkidle" });
     await page.waitForTimeout(500);
-    await capture(page, `${config.id}-07-workouts`);
+    await capture(page, `${config.id}-09-workouts`);
     await logScrollState(page, "Workout history");
   } else {
     await page.goto(`${BASE}/#/workouts`, { waitUntil: "networkidle" });
     await page.waitForTimeout(500);
-    await capture(page, `${config.id}-05-workouts`);
+    await capture(page, `${config.id}-07-workouts`);
     await logScrollState(page, "Workout history");
   }
 
@@ -531,3 +719,11 @@ main().catch((error) => {
   console.error("FAILED:", error);
   process.exit(1);
 });
+
+
+
+
+
+
+
+
