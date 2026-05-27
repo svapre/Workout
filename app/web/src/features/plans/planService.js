@@ -3,9 +3,13 @@ import {
   createDefaultMilestone,
   createActivePlanFromBlueprint,
   joinGoals,
+  migrateActivePlan,
   migrateBlueprint,
+  migrateExercise,
+  normalizeRoutineEntryBlocks,
   migrateRoutine,
   migrateStage,
+  migrateWorkoutSession,
   validateMilestoneTestAgainstExercise,
   validateRoutineEntryAgainstExercise,
 } from "../../data/schemaMigration.js";
@@ -21,6 +25,7 @@ import {
 } from "./activePlanRevision.js";
 
 const DEFAULT_DIRECT_EDIT_CHANGE_SUMMARY = "Edited live plan";
+const SUPPORTED_EXPORT_VERSION = "1.0";
 
 function normalizeImportedRoutineEntry(entry, index, exerciseLookup, routineLabel, unresolvedEntries) {
   const exerciseId = resolveExerciseReference(entry, exerciseLookup);
@@ -38,10 +43,22 @@ function normalizeImportedRoutineEntry(entry, index, exerciseLookup, routineLabe
     order: entry.order ?? index + 1,
     sets: entry.sets ?? entry.targetSets ?? 3,
     reps: typeof entry.reps === "string" ? parseInt(entry.reps, 10) || 10 : entry.reps ?? entry.targetReps ?? 10,
+    repTargetMode: entry.repTargetMode ?? null,
     durationSeconds: entry.durationSeconds ?? entry.targetDurationSec ?? null,
     weight: entry.weight ?? entry.targetWeightKg ?? null,
     resistance: entry.resistance ?? null,
     restSeconds: entry.restSeconds ?? entry.restSec ?? 60,
+    sideMode: entry.sideMode ?? "",
+    tempoMode: entry.tempoMode ?? null,
+    tempoSecondsPerRep: entry.tempoSecondsPerRep ?? entry.secondsPerRep ?? entry.cadenceSeconds ?? null,
+    tempoDownSeconds: entry.tempoDownSeconds ?? entry.downSeconds ?? entry.eccentricSeconds ?? null,
+    tempoBottomHoldSeconds: entry.tempoBottomHoldSeconds ?? entry.bottomHoldSeconds ?? entry.pauseBottomSeconds ?? null,
+    tempoUpSeconds: entry.tempoUpSeconds ?? entry.upSeconds ?? entry.concentricSeconds ?? null,
+    tempoTopHoldSeconds: entry.tempoTopHoldSeconds ?? entry.topHoldSeconds ?? entry.pauseTopSeconds ?? null,
+    tempoLabel: entry.tempoLabel ?? entry.tempo ?? null,
+    transitionAfterSeconds: entry.transitionAfterSeconds ?? entry.transitionSec ?? null,
+    transitionLabel: entry.transitionLabel ?? entry.transitionCue ?? "",
+    entryBlocks: normalizeRoutineEntryBlocks(entry.entryBlocks ?? entry.blocks),
     notes: entry.notes ?? "",
   };
 }
@@ -181,6 +198,19 @@ function assertExportDependencies(deps) {
   }
 }
 
+function assertActivePlanImportDependencies(deps) {
+  const {
+    bodyMapRepository,
+    exerciseRepository,
+    routineRepository,
+    workoutRepository,
+  } = deps;
+
+  if (!workoutRepository || !exerciseRepository || !routineRepository || !bodyMapRepository) {
+    throw new Error("Active plan import requires workout, exercise, routine, and body-map repositories.");
+  }
+}
+
 function assertRevisionDependencies(deps) {
   const {
     exerciseRepository,
@@ -231,6 +261,60 @@ function collectExerciseIds(activePlan, sessions, routines) {
   });
 
   return exerciseIds;
+}
+
+function collectExerciseIdsFromStages(stages, routines) {
+  const exerciseIds = new Set();
+
+  routines.forEach((routine) => {
+    (routine.entries || []).forEach((entry) => {
+      if (entry.exerciseId) {
+        exerciseIds.add(entry.exerciseId);
+      }
+    });
+  });
+
+  (stages || []).forEach((stage) => {
+    if (stage.milestone?.test?.exerciseId) {
+      exerciseIds.add(stage.milestone.test.exerciseId);
+    }
+  });
+
+  return exerciseIds;
+}
+
+function canonicalBodyTarget(entry) {
+  return JSON.stringify({
+    name: entry?.name ?? "",
+    category: entry?.category ?? "custom",
+    isCustom: Boolean(entry?.isCustom),
+  });
+}
+
+function canonicalExercise(entry) {
+  return JSON.stringify(migrateExercise(entry));
+}
+
+function canonicalRoutine(entry, exerciseCatalog = []) {
+  return JSON.stringify(migrateRoutine(entry, exerciseCatalog));
+}
+
+function canonicalWorkoutSession(entry) {
+  return JSON.stringify(migrateWorkoutSession(entry));
+}
+
+function ensureUniquePackageIds(items, kind) {
+  const seen = new Set();
+  items.forEach((entry) => {
+    const id = entry?.id;
+    if (!id) {
+      throw new Error(`Imported ${kind} entry is missing an id.`);
+    }
+    if (seen.has(id)) {
+      throw new Error(`Imported ${kind} package contains duplicate id "${id}".`);
+    }
+    seen.add(id);
+  });
 }
 
 function getRevisionContext(activeRepo, deps) {
@@ -344,6 +428,139 @@ export function createPlanService(blueprintRepo, activeRepo, deps = {}) {
     return { count: newPlans.length, firstPlanId: newPlans[0]?.id };
   }
 
+  function importActivePlanPackage(input) {
+    assertActivePlanImportDependencies(deps);
+
+    const rawPackage = typeof input === "string" ? JSON.parse(input) : JSON.parse(JSON.stringify(input));
+    const exportVersion = rawPackage?.exportVersion ?? null;
+    if (exportVersion !== SUPPORTED_EXPORT_VERSION) {
+      throw new Error(`Unsupported active-plan package version "${exportVersion ?? "unknown"}". Expected ${SUPPORTED_EXPORT_VERSION}.`);
+    }
+    if (!rawPackage?.activePlan || typeof rawPackage.activePlan !== "object") {
+      throw new Error("Imported package does not contain an activePlan payload.");
+    }
+
+    const localActivePlans = activeRepo.list();
+    const localBodyTargets = deps.bodyMapRepository.getAll();
+    const localExercises = deps.exerciseRepository.list();
+    const localRoutines = deps.routineRepository.list();
+    const localWorkouts = deps.workoutRepository.list();
+
+    const importedPlan = migrateActivePlan(rawPackage.activePlan);
+    const importedBodyTargets = (Array.isArray(rawPackage.bodyTargets) ? rawPackage.bodyTargets : []).map((entry) => ({
+      id: entry?.id ?? "",
+      name: entry?.name ?? "",
+      category: entry?.category ?? "custom",
+      isCustom: Boolean(entry?.isCustom),
+    }));
+    const importedExercises = (Array.isArray(rawPackage.exercises) ? rawPackage.exercises : []).map((entry) => migrateExercise(entry));
+    const importedRoutines = (Array.isArray(rawPackage.routines) ? rawPackage.routines : []).map((entry) => migrateRoutine(entry, importedExercises));
+    const importedSessions = (Array.isArray(rawPackage.sessions) ? rawPackage.sessions : []).map((entry) => migrateWorkoutSession(entry));
+
+    ensureUniquePackageIds(importedBodyTargets, "body-target");
+    ensureUniquePackageIds(importedExercises, "exercise");
+    ensureUniquePackageIds(importedRoutines, "routine");
+    ensureUniquePackageIds(importedSessions, "session");
+
+    if (localActivePlans.some((plan) => plan.id === importedPlan.id)) {
+      throw new Error(`An active plan named "${importedPlan.displayName || importedPlan.name || importedPlan.id}" already exists in this app.`);
+    }
+
+    const mergedBodyTargets = [...localBodyTargets];
+    const knownBodyTargetIds = new Set(localBodyTargets.map((entry) => entry.id));
+    importedBodyTargets.forEach((entry) => {
+      const existing = localBodyTargets.find((target) => target.id === entry.id);
+      if (existing) {
+        if (canonicalBodyTarget(existing) !== canonicalBodyTarget(entry)) {
+          throw new Error(`Body-target conflict for "${entry.name || entry.id}". Import into a clean state or resolve the shared taxonomy first.`);
+        }
+        return;
+      }
+      mergedBodyTargets.push(entry);
+      knownBodyTargetIds.add(entry.id);
+    });
+
+    importedExercises.forEach((exercise) => {
+      (exercise.bodyTargets || []).forEach((targetId) => {
+        if (!knownBodyTargetIds.has(targetId)) {
+          throw new Error(`Imported exercise "${exercise.name || exercise.id}" references unknown body target "${targetId}".`);
+        }
+      });
+    });
+
+    const mergedExercises = [...localExercises];
+    const knownExerciseIds = new Set(localExercises.map((entry) => entry.id));
+    importedExercises.forEach((exercise) => {
+      const existing = localExercises.find((entry) => entry.id === exercise.id);
+      if (existing) {
+        if (canonicalExercise(existing) !== canonicalExercise(exercise)) {
+          throw new Error(`Exercise conflict for "${exercise.name || exercise.id}". Import into a clean state or resolve the shared catalog first.`);
+        }
+        return;
+      }
+      mergedExercises.push(exercise);
+      knownExerciseIds.add(exercise.id);
+    });
+
+    importedRoutines.forEach((routine) => {
+      (routine.entries || []).forEach((entry) => {
+        if (!knownExerciseIds.has(entry.exerciseId)) {
+          throw new Error(`Imported routine "${routine.name || routine.id}" references unknown exercise "${entry.exerciseId}".`);
+        }
+      });
+    });
+
+    const mergedRoutines = [...localRoutines];
+    const knownRoutineIds = new Set(localRoutines.map((entry) => entry.id));
+    importedRoutines.forEach((routine) => {
+      const existing = localRoutines.find((entry) => entry.id === routine.id);
+      if (existing) {
+        if (canonicalRoutine(existing, mergedExercises) !== canonicalRoutine(routine, mergedExercises)) {
+          throw new Error(`Routine conflict for "${routine.name || routine.id}". Import into a clean state or resolve the shared routine library first.`);
+        }
+        return;
+      }
+      mergedRoutines.push(routine);
+      knownRoutineIds.add(routine.id);
+    });
+
+    (importedPlan.stages || []).forEach((stage) => {
+      (stage.schedule || []).forEach((entry) => {
+        if (entry?.type === "routine" && entry.routineId && !knownRoutineIds.has(entry.routineId)) {
+          throw new Error(`Imported active plan references unknown routine "${entry.routineId}" in stage "${stage.name || stage.id}".`);
+        }
+      });
+      const milestoneExerciseId = stage?.milestone?.test?.exerciseId;
+      if (milestoneExerciseId && !knownExerciseIds.has(milestoneExerciseId)) {
+        throw new Error(`Imported milestone test references unknown exercise "${milestoneExerciseId}" in stage "${stage.name || stage.id}".`);
+      }
+    });
+
+    const existingWorkoutIds = new Set(localWorkouts.map((entry) => entry.id));
+    importedSessions.forEach((session) => {
+      if (existingWorkoutIds.has(session.id)) {
+        throw new Error(`Workout history already contains session "${session.id}". Import into a clean state before restoring this package.`);
+      }
+      if (session.activePlanId && session.activePlanId !== importedPlan.id) {
+        throw new Error(`Imported session "${session.id}" points at a different active plan id.`);
+      }
+    });
+
+    const restoredSessionIds = importedSessions.map((session) => session.id);
+    const restoredPlan = {
+      ...importedPlan,
+      sessions: restoredSessionIds,
+    };
+
+    deps.bodyMapRepository.replaceAll(mergedBodyTargets);
+    deps.exerciseRepository.replaceAll(mergedExercises);
+    deps.routineRepository.replaceAll(mergedRoutines);
+    deps.workoutRepository.replaceAll([...importedSessions, ...localWorkouts]);
+    activeRepo.replaceAll([...localActivePlans, restoredPlan]);
+
+    return restoredPlan;
+  }
+
   function getActivePlan(id) {
     return activeRepo.list().find((p) => p.id === id);
   }
@@ -359,6 +576,11 @@ export function createPlanService(blueprintRepo, activeRepo, deps = {}) {
   }
 
   function importFullPlan(data, routineService, exerciseCatalog = []) {
+    const exportVersion = data?.exportVersion ?? null;
+    if (exportVersion && exportVersion !== SUPPORTED_EXPORT_VERSION) {
+      throw new Error(`Unsupported blueprint package version "${exportVersion}". Expected ${SUPPORTED_EXPORT_VERSION}.`);
+    }
+
     if (!data.plan || !data.routines) {
       throw new Error("Invalid plan format");
     }
@@ -459,7 +681,7 @@ export function createPlanService(blueprintRepo, activeRepo, deps = {}) {
     return migratedPlan.id;
   }
 
-  function exportFullPlan(planId, routineService) {
+  function exportFullPlan(planId, routineService, exerciseCatalog = [], bodyTargets = []) {
     const plan = getBlueprint(planId);
     if (!plan) throw new Error("Plan not found");
 
@@ -472,12 +694,28 @@ export function createPlanService(blueprintRepo, activeRepo, deps = {}) {
 
     const allRoutines = routineService.getAll();
     const referencedRoutines = allRoutines.filter((routine) => routineIds.has(routine.id));
+    const allExercises = Array.isArray(exerciseCatalog) && exerciseCatalog.length
+      ? exerciseCatalog
+      : deps.exerciseRepository?.list?.() ?? [];
+    const exerciseIds = collectExerciseIdsFromStages(plan.stages, referencedRoutines);
+    const referencedExercises = allExercises.filter((exercise) => exerciseIds.has(exercise.id));
+    const bodyTargetIds = new Set(
+      referencedExercises.flatMap((exercise) => exercise.bodyTargets || []).filter(Boolean),
+    );
+    const allBodyTargets = Array.isArray(bodyTargets) && bodyTargets.length
+      ? bodyTargets
+      : deps.bodyMapRepository?.getAll?.() ?? [];
+    const referencedBodyTargets = allBodyTargets.filter((entry) => bodyTargetIds.has(entry.id));
 
     return JSON.stringify(
       {
+        exportVersion: "1.0",
+        exportedAt: new Date().toISOString(),
         plan,
         routines: referencedRoutines,
         stages: plan.stages,
+        exercises: referencedExercises,
+        bodyTargets: referencedBodyTargets,
       },
       null,
       2,
@@ -602,6 +840,7 @@ export function createPlanService(blueprintRepo, activeRepo, deps = {}) {
     updateActivePlan,
     importPrepared,
     importFullPlan,
+    importActivePlanPackage,
     exportFullPlan,
     exportActivePlan,
     prepareActivePlanRevision,

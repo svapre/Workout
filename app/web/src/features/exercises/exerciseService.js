@@ -35,6 +35,15 @@ export function createExerciseService(repository) {
     getById(exerciseId) {
       return repository.list().find((exercise) => exercise.id === exerciseId) ?? null;
     },
+    deleteExercise(exerciseId) {
+      const current = repository.list();
+      const next = current.filter((exercise) => exercise.id !== exerciseId);
+      if (next.length === current.length) {
+        return false;
+      }
+      save(next);
+      return true;
+    },
     importFromCsv(csvText) {
       const current = repository.list();
       const usedSlugs = new Set(current.map((exercise) => exercise.slug));

@@ -237,14 +237,14 @@ function evaluateTest(stage, workouts, routines, activePlan, exercises) {
 
 function formatEligibilityProgress(eligibility) {
   if (eligibility.type === "sessions") {
-    return `${eligibility.current} / ${eligibility.target} session${eligibility.target === 1 ? "" : "s"} completed`;
+    return `${eligibility.current} of ${eligibility.target} session${eligibility.target === 1 ? "" : "s"} complete`;
   }
 
   if (eligibility.type === "cycles") {
     if (eligibility.requiresContinuous) {
-      return `${eligibility.current} / ${eligibility.target} consecutive ${eligibility.target === 1 ? "cycle" : "cycles"}`;
+      return `${eligibility.current} of ${eligibility.target} consecutive cycle completion${eligibility.target === 1 ? "" : "s"}`;
     }
-    return `${eligibility.current} / ${eligibility.target} ${eligibility.target === 1 ? "cycle" : "cycles"} completed`;
+    return `${eligibility.current} of ${eligibility.target} cycle completion${eligibility.target === 1 ? "" : "s"} complete`;
   }
 
   return "Eligible at any time";
@@ -261,7 +261,7 @@ function formatTestLabel(test) {
     : test.resistance
       ? ` @ ${test.resistance}`
       : "";
-  return `${test.exerciseName} · ${test.target} ${metricLabel}${loadLabel}`;
+  return `${test.exerciseName} - ${test.target} ${metricLabel}${loadLabel}`;
 }
 
 export function evaluateStageProgress(stage, workouts, routines, activePlan, exercises = []) {
@@ -295,13 +295,13 @@ export function evaluateStageProgress(stage, workouts, routines, activePlan, exe
       target = test.target ?? 1;
       status = "complete";
     } else if (test.lastResult === "failed") {
-      progressText = "Milestone test unlocked · last attempt failed";
+      progressText = "Milestone test unlocked Â· last attempt failed";
       progressType = "test";
       current = 0;
       target = test.target ?? 1;
       status = "ready_for_test";
     } else {
-      progressText = "Milestone test unlocked · ready when you are";
+      progressText = "Milestone test unlocked Â· ready when you are";
       progressType = "test";
       current = 0;
       target = test.target ?? 1;

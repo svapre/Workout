@@ -1,5 +1,6 @@
 import { createId } from "../../core/uid.js";
 import {
+  getExerciseExecutionUnitType,
   getExerciseSupportedTrackingModes,
   mapTrackingType,
   normalizeTrackingModes,
@@ -14,6 +15,7 @@ const EXERCISE_COLUMNS = [
   "category",
   "type",
   "tracking_type",
+  "execution_unit_type",
   "supported_tracking_modes",
   "equipment",
   "body_targets",
@@ -76,6 +78,7 @@ export function exportExerciseCatalogToCsv(exercises) {
     category: exercise.category ?? "",
     type: exercise.type ?? "",
     tracking_type: exercise.trackingType ?? mapTrackingType(exercise.mode),
+    execution_unit_type: exercise.executionUnitType ?? getExerciseExecutionUnitType(exercise),
     supported_tracking_modes: getExerciseSupportedTrackingModes(exercise).join("|"),
     equipment: (exercise.equipment ?? []).join("|"),
     body_targets: (exercise.bodyTargets ?? []).join("|"),
@@ -115,6 +118,7 @@ export function importExerciseCatalogFromCsv(csvText, usedSlugs) {
         category: row.category?.trim() || "strength",
         type: row.type?.trim() || "physical",
         trackingType: mapTrackingType(row.tracking_type?.trim() || row.mode?.trim() || "reps-only"),
+        executionUnitType: row.execution_unit_type?.trim() || "",
         supportedTrackingModes: normalizeTrackingModes(
           row.supported_tracking_modes?.trim() || "",
           row.tracking_type?.trim() || row.mode?.trim() || "reps-only",

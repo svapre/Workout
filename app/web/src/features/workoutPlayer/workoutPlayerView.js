@@ -7,11 +7,23 @@ import {
   buildFailureTransitionPatch,
   buildScheduleCompletionState,
 } from "../plans/stageProgression.js";
-import { inferRoutineEntryTrackingType } from "../../data/schemaMigration.js";
+import {
+  getExerciseExecutionUnitType,
+  getRoutineBlockMetricType,
+  getRoutineBlockTempoPresentation,
+  getRoutineEntryBlocks,
+} from "../../data/schemaMigration.js";
+import {
+  buildEntryWorkDisplayMap,
+  formatEffortLabel,
+  formatRepGoalLabel,
+  usesOpenEndedRepGoal,
+} from "../routines/executionFlow.js";
 
 let currentSession = null;
 let restTimerInterval = null;
 let sessionTimerInterval = null;
+let activeWorkInterval = null;
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -27,9 +39,234 @@ function formatTime(totalSeconds) {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+function formatDurationToken(totalSeconds) {
+  const numeric = Number(totalSeconds);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "";
+  }
+  if (numeric % 60 === 0) {
+    return `${numeric / 60} min`;
+  }
+  if (numeric >= 60) {
+    const mins = Math.floor(numeric / 60);
+    const secs = numeric % 60;
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins} min`;
+  }
+  return `${numeric}s`;
+}
+
+function formatBlockSideLabel(side) {
+  const normalized = String(side ?? "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "left") return "Left side";
+  if (normalized === "right") return "Right side";
+  if (normalized === "both") return "Both sides";
+  if (normalized === "alternating") return "Alternating";
+  return normalized;
+}
+
+function getEffectiveRestKind(set) {
+  if (currentSession?.restPhase === "followup" && set?.followupRestKind) {
+    return set.followupRestKind;
+  }
+  return set?.restKind || "set";
+}
+
+function resolveRestPreview(currentSet, nextSet, state) {
+  const nextSetName = nextSet ? getExerciseDisplayName(state, nextSet.exerciseId) : "";
+  const nextSetTitle = nextSet ? getSetDisplayTitle(nextSet) : "";
+  const nextSetProgress = nextSet ? getSetProgressLabel(nextSet) : "";
+  const effectiveRestKind = getEffectiveRestKind(currentSet);
+  const isFollowupTransition = currentSession?.restPhase === "followup";
+
+  if (effectiveRestKind === "transition") {
+    return {
+      heading: "Next Activity",
+      title: nextSetName || "Workout Complete",
+      subtitle: nextSetTitle,
+      progress: nextSetProgress,
+      cue: isFollowupTransition
+        ? String(currentSet?.followupTransitionLabel || "").trim()
+        : String(currentSet?.transitionLabel || "").trim(),
+    };
+  }
+
+  if (currentSet?.followupRestKind === "transition") {
+    const transitionDuration = Number.isFinite(Number(currentSet?.followupRestSec))
+      && Number(currentSet.followupRestSec) > 0
+      ? formatDurationToken(currentSet.followupRestSec)
+      : "";
+    return {
+      heading: "Next Up",
+      title: "Transition",
+      subtitle: [transitionDuration ? `${transitionDuration} to` : "Moving to", nextSetName].filter(Boolean).join(" "),
+      progress: [nextSetTitle, nextSetProgress].filter(Boolean).join(" · "),
+      cue: String(currentSet?.followupTransitionLabel || "").trim(),
+    };
+  }
+
+  return {
+    heading: "Next Up",
+    title: nextSetName || "Workout Complete",
+    subtitle: nextSetTitle,
+    progress: nextSetProgress,
+    cue: String(currentSet?.transitionLabel || "").trim(),
+  };
+}
+
+function getTempoPhaseSymbol(kind) {
+  if (kind === "down") return "↓";
+  if (kind === "up") return "↑";
+  if (kind === "cadence") return "•";
+  if (kind === "bottom_hold") return "B";
+  if (kind === "top_hold") return "T";
+  return "~";
+}
+
+function resolveBlockTrackingType(block, entry, exercise) {
+  const metricType = getRoutineBlockMetricType(
+    block,
+    entry?.trackingType ?? exercise?.trackingType ?? "reps",
+  );
+
+  if (metricType === "duration") {
+    return "duration";
+  }
+  if (block?.weight != null || entry?.weight != null || entry?.targetWeightKg != null) {
+    return "weight";
+  }
+  if (
+    (block?.resistance != null && block?.resistance !== "")
+    || (entry?.resistance != null && entry?.resistance !== "")
+  ) {
+    return "resistance";
+  }
+  return "reps";
+}
+
+function resolveSetFacts(set) {
+  const tempoPresentation = getRoutineBlockTempoPresentation(set);
+  const repGoalLabel = formatRepGoalLabel({
+    metricType: "reps",
+    targetReps: set?.targetReps,
+    repTargetMode: set?.repTargetMode,
+    effort: set?.effort,
+  });
+  return {
+    tempoPresentation,
+    facts: [
+    usesOpenEndedRepGoal({
+      metricType: "reps",
+      targetReps: set?.targetReps,
+      repTargetMode: set?.repTargetMode,
+      effort: set?.effort,
+    })
+      ? { label: "Goal", value: repGoalLabel }
+      : null,
+    set?.side
+      ? { label: "Side", value: formatBlockSideLabel(set.side) }
+      : null,
+    set?.holdSeconds
+      ? { label: "Hold", value: `${formatDurationToken(set.holdSeconds)} per rep` }
+      : null,
+    set?.effort && String(set.effort).trim().toLowerCase() !== "amrap"
+      ? { label: "Effort", value: formatEffortLabel(set.effort) }
+      : null,
+    set?.targetResistance
+      ? { label: "Resistance", value: set.targetResistance }
+      : null,
+    ].filter(Boolean),
+  };
+}
+
+function resolveRepsInputConfig(set) {
+  const openEnded = usesOpenEndedRepGoal({
+    metricType: "reps",
+    targetReps: set?.targetReps,
+    repTargetMode: set?.repTargetMode,
+    effort: set?.effort,
+  });
+
+  return {
+    label: openEnded ? "Actual reps" : "Reps",
+    value: openEnded ? "" : (set?.targetReps ?? 0),
+    placeholder: "",
+  };
+}
+
+function renderSetFacts(set, { compact = false, collapseTempo = false } = {}) {
+  const { facts, tempoPresentation } = resolveSetFacts(set);
+  if (!facts.length && !(tempoPresentation?.steps?.length)) {
+    return "";
+  }
+
+  const chipStyle = compact
+    ? "display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:88px; padding:8px 10px; border-radius:12px; border:1px solid rgba(143,168,210,0.18); background:rgba(255,255,255,0.05);"
+    : "display:inline-flex; flex-direction:column; align-items:flex-start; gap:3px; min-width:112px; padding:10px 12px; border-radius:14px; border:1px solid rgba(143,168,210,0.18); background:rgba(255,255,255,0.05);";
+  const shouldCollapseTempo = collapseTempo && (tempoPresentation?.steps?.length || 0) > 1;
+  const tempoStrip = tempoPresentation?.steps?.length
+    ? shouldCollapseTempo
+      ? `
+        <details style="margin:${facts.length ? "0 0 14px" : "0 0 18px"}; text-align:left; border-radius:16px; border:1px solid rgba(143,168,210,0.14); background:rgba(255,255,255,0.03); padding:10px 12px;">
+          <summary style="cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--soft); font-weight:800; font-size:0.94rem;">
+            <span style="display:inline-flex; align-items:center; gap:8px;">
+              <span aria-hidden="true" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; background:rgba(79,209,197,0.14); color:var(--brand); font-size:0.72rem; font-weight:900;">↕</span>
+              <span>Tempo guide</span>
+            </span>
+            <span style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(tempoPresentation.summary || `${tempoPresentation.steps.length} phases`)}</span>
+          </summary>
+          <div aria-label="${escapeHtml(tempoPresentation.summary || "Tempo")}" style="display:grid; gap:8px; margin-top:12px;">
+            ${tempoPresentation.steps.map((step) => `
+              <span style="display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; min-width:0; padding:8px 10px; border-radius:12px; border:1px solid rgba(143,168,210,0.12); background:rgba(255,255,255,0.03);">
+                <span aria-hidden="true" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:999px; background:${step.kind === "bottom_hold" || step.kind === "top_hold" ? "rgba(248,195,106,0.14)" : "rgba(79,209,197,0.14)"}; color:${step.kind === "bottom_hold" || step.kind === "top_hold" ? "var(--brand-2)" : "var(--brand)"}; font-size:0.72rem; font-weight:900; line-height:1;">${escapeHtml(getTempoPhaseSymbol(step.kind))}</span>
+                <span style="font-size:0.82rem; color:var(--soft); font-weight:700; min-width:0;">${escapeHtml(step.label || "Tempo")}</span>
+                <span style="font-size:0.84rem; color:var(--text); font-weight:800;">${escapeHtml(step.value || "")}</span>
+              </span>
+            `).join("")}
+          </div>
+        </details>
+      `
+      : `
+        <div aria-label="${escapeHtml(tempoPresentation.summary || "Tempo")}" style="display:flex; flex-wrap:wrap; gap:${compact ? "8px" : "10px"}; justify-content:center; margin:${facts.length ? "0 0 18px" : "0 0 20px"};">
+          ${tempoPresentation.steps.map((step) => `
+            <span style="display:inline-flex; align-items:center; gap:${compact ? "6px" : "8px"}; min-width:0; padding:${compact ? "7px 10px" : "9px 12px"}; border-radius:999px; border:1px solid rgba(143,168,210,0.16); background:rgba(255,255,255,0.04);">
+              <span aria-hidden="true" style="display:inline-flex; align-items:center; justify-content:center; width:${compact ? "18px" : "20px"}; height:${compact ? "18px" : "20px"}; border-radius:999px; background:${step.kind === "bottom_hold" || step.kind === "top_hold" ? "rgba(248,195,106,0.14)" : "rgba(79,209,197,0.14)"}; color:${step.kind === "bottom_hold" || step.kind === "top_hold" ? "var(--brand-2)" : "var(--brand)"}; font-size:${compact ? "0.72rem" : "0.78rem"}; font-weight:900; line-height:1;">${escapeHtml(getTempoPhaseSymbol(step.kind))}</span>
+              <span style="display:inline-flex; flex-wrap:wrap; gap:4px; align-items:baseline; min-width:0;">
+                <span style="font-size:${compact ? "0.66rem" : "0.74rem"}; color:var(--muted); font-weight:800; letter-spacing:0.04em;">${escapeHtml(step.label || "Tempo")}</span>
+                <span style="font-size:${compact ? "0.9rem" : "0.98rem"}; color:var(--soft); font-weight:800; line-height:1.2;">${escapeHtml(step.value || "")}</span>
+              </span>
+            </span>
+          `).join("")}
+        </div>
+      `
+    : "";
+
+  return `
+    ${facts.length ? `
+      <div style="display:flex; flex-wrap:wrap; gap:${compact ? "8px" : "12px"}; justify-content:center; margin:${compact ? "0 0 12px" : "0 0 16px"};">
+        ${facts.map((fact) => `
+          <span style="${chipStyle}">
+            <span style="font-size:${compact ? "0.62rem" : "0.72rem"}; color:var(--muted); font-weight:800; letter-spacing:0.08em; text-transform:uppercase;">${escapeHtml(fact.label)}</span>
+            <span style="font-size:${compact ? "0.98rem" : "1.08rem"}; color:var(--text); font-weight:800; line-height:1.2;">${escapeHtml(fact.value)}</span>
+          </span>
+        `).join("")}
+      </div>
+    ` : ""}
+    ${tempoStrip}
+  `;
+}
+
+function getSetDisplayTitle(set) {
+  return String(set?.displayTitle || set?.setLabel || `Set ${set?.setNumber || 1}`).trim();
+}
+
+function getSetProgressLabel(set) {
+  return String(set?.progressLabel || "").trim();
+}
+
 function formatExerciseFallback(exerciseId) {
   const raw = String(exerciseId ?? "").trim();
-  if (!raw) return "Unknown Exercise";
+  if (!raw) return "Unknown activity";
   return raw
     .split(/[-_]/g)
     .filter(Boolean)
@@ -70,11 +307,16 @@ function getPlayerViewport() {
   return {
     compact: width <= 480 || height <= 760,
     narrow: width <= 480,
+    veryNarrow: width <= 360,
     short: height <= 760,
   };
 }
 
 function clearAllIntervals() {
+  if (activeWorkInterval) {
+    clearInterval(activeWorkInterval);
+    activeWorkInterval = null;
+  }
   if (restTimerInterval) {
     clearInterval(restTimerInterval);
     restTimerInterval = null;
@@ -141,7 +383,7 @@ function buildRoutineSessionSets(routine, state) {
   const sets = [];
   const entries = routine.entries || routine.exercises || [];
 
-  entries.forEach((exInstance) => {
+  entries.forEach((exInstance, entryIndex) => {
     const refId = exInstance.exerciseId || "";
     const catalogEntry = resolveExerciseCatalogEntry(state, refId);
 
@@ -149,27 +391,111 @@ function buildRoutineSessionSets(routine, state) {
       console.warn("Unresolved exercise reference:", exInstance);
     }
 
-    const setCount = parseInt(exInstance.sets ?? exInstance.targetSets ?? 1, 10);
-    const trackingType = inferRoutineEntryTrackingType(exInstance, catalogEntry);
-    for (let i = 1; i <= setCount; i += 1) {
+    const setRestSec = Number.isFinite(Number(
+      exInstance.restSeconds ?? exInstance.restSec ?? catalogEntry?.restSeconds,
+    ))
+      ? Math.max(0, Number(exInstance.restSeconds ?? exInstance.restSec ?? catalogEntry?.restSeconds))
+      : 60;
+    const transitionAfterSeconds = Number.isFinite(Number(
+      exInstance.transitionAfterSeconds ?? exInstance.transitionSec,
+    ))
+      ? Math.max(0, Number(exInstance.transitionAfterSeconds ?? exInstance.transitionSec))
+      : setRestSec;
+    const transitionLabel = String(
+      exInstance.transitionLabel ?? exInstance.transitionCue ?? "",
+    ).trim();
+    const isLastEntry = entryIndex === entries.length - 1;
+    const hasEntryTransition = !isLastEntry && (transitionAfterSeconds > 0 || Boolean(transitionLabel));
+    const blocks = getRoutineEntryBlocks(exInstance);
+    const hasExplicitBlocks = Array.isArray(exInstance?.entryBlocks) && exInstance.entryBlocks.length > 0;
+    const workBlocks = blocks.filter((block) => block.type === "work");
+    const { displayMap } = buildEntryWorkDisplayMap(blocks);
+    const totalSets = Math.max(1, workBlocks.length);
+    let workIndex = 0;
+
+    blocks.forEach((block, blockIndex) => {
+      if (block.type !== "work") {
+        return;
+      }
+
+      workIndex += 1;
+      const metricType = getRoutineBlockMetricType(
+        block,
+        exInstance?.trackingType ?? catalogEntry?.trackingType ?? "reps",
+      );
+      const trackingType = resolveBlockTrackingType(block, exInstance, catalogEntry);
+      const displayMeta = displayMap.get(block.id) || {
+        logicalIndex: workIndex,
+        totalLogical: totalSets,
+        displayTitle: `Set ${workIndex}`,
+        progressLabel: totalSets > 1 ? `Set ${workIndex} of ${totalSets}` : "",
+      };
+      const nextBlock = blocks[blockIndex + 1] || null;
+      const blockAfterNext = blocks[blockIndex + 2] || null;
+      let restSec = 0;
+      let restKind = "complete";
+      let cue = "";
+      let followupRestKind = null;
+      let followupRestSec = 0;
+      let followupTransitionLabel = "";
+
+      if (nextBlock?.type === "rest") {
+        restSec = Number.isFinite(Number(nextBlock.seconds)) ? Math.max(0, Number(nextBlock.seconds)) : setRestSec;
+        restKind = "set";
+        if (hasEntryTransition && !blockAfterNext) {
+          followupRestKind = "transition";
+          followupRestSec = transitionAfterSeconds;
+          followupTransitionLabel = transitionLabel;
+        }
+      } else if (nextBlock?.type === "switch_side") {
+        restSec = 0;
+        restKind = "instruction";
+        cue = String(
+          nextBlock.label || (nextBlock?.side ? `Switch to ${formatBlockSideLabel(nextBlock.side)}` : "Switch sides"),
+        ).trim();
+      } else if (hasEntryTransition) {
+        restSec = transitionAfterSeconds;
+        restKind = "transition";
+        cue = transitionLabel;
+      }
+
       sets.push({
         id: `set_${sets.length}_${Date.now()}`,
         exerciseId: catalogEntry?.id || refId,
+        executionUnitType: getExerciseExecutionUnitType(catalogEntry),
         trackingType,
-        setNumber: i,
-        totalSets: setCount,
-        targetReps: exInstance.reps ?? exInstance.targetReps,
-        targetWeightKg: exInstance.weight ?? exInstance.targetWeightKg,
-        targetDurationSec: exInstance.durationSeconds ?? exInstance.targetDurationSec,
-        targetResistance: exInstance.resistance ?? null,
-        restSec:
-          exInstance.restSeconds ??
-          exInstance.restSec ??
-          catalogEntry?.restSeconds ??
-          60,
-        notes: exInstance.notes,
+        metricType,
+        side: block?.side ?? null,
+        repTargetMode: block?.repTargetMode ?? exInstance?.repTargetMode ?? null,
+        effort: block?.effort ?? null,
+        holdSeconds: block?.holdSeconds ?? null,
+        tempoMode: block?.tempoMode ?? null,
+        tempoSecondsPerRep: block?.tempoSecondsPerRep ?? null,
+        tempoDownSeconds: block?.tempoDownSeconds ?? null,
+        tempoBottomHoldSeconds: block?.tempoBottomHoldSeconds ?? null,
+        tempoUpSeconds: block?.tempoUpSeconds ?? null,
+        tempoTopHoldSeconds: block?.tempoTopHoldSeconds ?? null,
+        tempoLabel: block?.tempoLabel ?? null,
+        setNumber: workIndex,
+        totalSets,
+        setLabel: block.label || `Set ${workIndex}`,
+        displayTitle: displayMeta.displayTitle || block.label || `Set ${workIndex}`,
+        logicalIndex: displayMeta.logicalIndex,
+        logicalTotal: displayMeta.totalLogical,
+        progressLabel: displayMeta.progressLabel,
+        targetReps: block.reps ?? (hasExplicitBlocks ? null : (exInstance.reps ?? exInstance.targetReps)),
+        targetWeightKg: block.weight ?? (hasExplicitBlocks ? null : (exInstance.weight ?? exInstance.targetWeightKg)),
+        targetDurationSec: block.durationSeconds ?? (hasExplicitBlocks ? null : (exInstance.durationSeconds ?? exInstance.targetDurationSec)),
+        targetResistance: block.resistance ?? (hasExplicitBlocks ? null : (exInstance.resistance ?? null)),
+        restSec,
+        restKind,
+        transitionLabel: cue,
+        followupRestKind,
+        followupRestSec,
+        followupTransitionLabel,
+        notes: block.notes || exInstance.notes,
       });
-    }
+    });
   });
 
   return sets;
@@ -177,13 +503,12 @@ function buildRoutineSessionSets(routine, state) {
 
 function resolveSetInputs(set) {
   const trackingType = String(set?.trackingType ?? "reps");
-  const showDuration = trackingType === "duration" || set?.targetDurationSec != null;
+  const metricType = String(set?.metricType ?? (trackingType === "duration" ? "duration" : "reps"));
+  const showDuration = metricType === "duration" || set?.targetDurationSec != null;
   const showWeight = trackingType === "weight" || set?.targetWeightKg != null;
   const showResistance = trackingType === "resistance" || set?.targetResistance != null;
   const showReps =
-    trackingType === "reps" ||
-    trackingType === "weight" ||
-    trackingType === "resistance" ||
+    metricType === "reps" ||
     set?.targetReps != null;
 
   return {
@@ -192,6 +517,123 @@ function resolveSetInputs(set) {
     showDuration,
     showResistance,
   };
+}
+
+function isTimedWorkSet(set) {
+  return String(set?.metricType ?? "") === "duration"
+    && Number.isFinite(Number(set?.targetDurationSec))
+    && Number(set.targetDurationSec) > 0;
+}
+
+function clearActiveWorkInterval() {
+  if (activeWorkInterval) {
+    clearInterval(activeWorkInterval);
+    activeWorkInterval = null;
+  }
+}
+
+function resetActiveWorkState() {
+  if (!currentSession) {
+    return;
+  }
+  currentSession.activeWorkSetId = null;
+  currentSession.workRemaining = 0;
+  currentSession.workDurationTotal = 0;
+}
+
+function resolveLoggedDuration(set, explicitDuration) {
+  if (explicitDuration != null) {
+    return explicitDuration;
+  }
+
+  if (
+    currentSession
+    && currentSession.activeWorkSetId === set?.id
+    && Number.isFinite(Number(currentSession.workDurationTotal))
+  ) {
+    return Math.max(
+      0,
+      Number(currentSession.workDurationTotal) - Number(currentSession.workRemaining ?? 0),
+    );
+  }
+
+  return Number.isFinite(Number(set?.targetDurationSec))
+    ? Number(set.targetDurationSec)
+    : null;
+}
+
+function updateTimedWorkDisplay(container) {
+  if (!currentSession) {
+    return;
+  }
+
+  const timerDisplay = container.querySelector("#work-timer");
+  if (timerDisplay) {
+    timerDisplay.textContent = formatTime(Math.max(0, Number(currentSession.workRemaining ?? 0)));
+  }
+
+  const progressFill = container.querySelector("#work-progress-fill");
+  if (progressFill && Number.isFinite(Number(currentSession.workDurationTotal)) && Number(currentSession.workDurationTotal) > 0) {
+    const completed = Math.max(
+      0,
+      Number(currentSession.workDurationTotal) - Number(currentSession.workRemaining ?? 0),
+    );
+    const percent = Math.max(0, Math.min(100, Math.round((completed / Number(currentSession.workDurationTotal)) * 100)));
+    progressFill.style.width = `${percent}%`;
+  }
+}
+
+function startActiveWorkInterval(container, actions, state) {
+  clearActiveWorkInterval();
+
+  const set = currentSession?.sets?.[currentSession.currentIndex];
+  if (!set || !isTimedWorkSet(set) || currentSession.isPaused) {
+    return;
+  }
+
+  activeWorkInterval = setInterval(() => {
+    if (!currentSession || currentSession.isPaused || currentSession.status !== "active") {
+      return;
+    }
+
+    if (currentSession.activeWorkSetId !== set.id) {
+      clearActiveWorkInterval();
+      return;
+    }
+
+    currentSession.workRemaining = Math.max(0, Number(currentSession.workRemaining ?? 0) - 1);
+    updateTimedWorkDisplay(container);
+
+    if (currentSession.workRemaining <= 0) {
+      completeLoggedSet("success", null, container, actions, state);
+    }
+  }, 1000);
+}
+
+function ensureTimedWorkState(container, actions, state, set) {
+  if (!isTimedWorkSet(set)) {
+    clearActiveWorkInterval();
+    resetActiveWorkState();
+    return;
+  }
+
+  const targetDuration = Math.max(0, Number(set.targetDurationSec ?? 0));
+  if (currentSession.activeWorkSetId !== set.id) {
+    currentSession.activeWorkSetId = set.id;
+    currentSession.workDurationTotal = targetDuration;
+    currentSession.workRemaining = targetDuration;
+  }
+
+  updateTimedWorkDisplay(container);
+
+  if (currentSession.workRemaining <= 0) {
+    completeLoggedSet("success", null, container, actions, state);
+    return;
+  }
+
+  if (!currentSession.isPaused) {
+    startActiveWorkInterval(container, actions, state);
+  }
 }
 
 function createSessionShell(plan, stage, sessionType, routineId, routineName, sets, extra = {}) {
@@ -210,8 +652,12 @@ function createSessionShell(plan, stage, sessionType, routineId, routineName, se
     currentIndex: 0,
     status: "pre-workout",
     restRemaining: 0,
+    restPhase: null,
     sessionSeconds: 0,
     isPaused: false,
+    activeWorkSetId: null,
+    workRemaining: 0,
+    workDurationTotal: 0,
     sessionStartedAtIso: null,
     persistedSessionId: null,
     completionContext: null,
@@ -327,6 +773,7 @@ function initSession(plan, state, sessionType = "routine") {
     currentIndex: 0,
     status: "pre-workout",
     restRemaining: 0,
+    restPhase: null,
     sessionSeconds: 0,
     isPaused: false,
     sessionStartedAtIso: null,
@@ -383,6 +830,7 @@ function renderUI(container, actions, state) {
   } else {
     renderHUD(wrapper, container, actions);
     const content = document.createElement("div");
+    content.setAttribute("data-player-content", "true");
     content.style.flexGrow = "1";
     content.style.minHeight = "0";
     content.style.display = "flex";
@@ -404,10 +852,62 @@ function renderUI(container, actions, state) {
 }
 
 function renderPreWorkout(wrapper, container, actions, state) {
+    const exerciseSummary = summarizeSessionExercises(currentSession.sets, state);
+    const uniqueExerciseCount = exerciseSummary.length;
+    const exerciseLabel = uniqueExerciseCount === 1 ? "activity" : "activities";
+    const startLabel = currentSession.sessionType === "milestone_test" ? "Start test" : "Start routine";
+
+    wrapper.innerHTML = `
+        <div class="player-prep-screen">
+            <div class="player-prep">
+                <div>
+                    <p class="player-prep__eyebrow" style="color: ${currentSession.theme.color};">${escapeHtml(currentSession.planDisplayName)} / Stage ${currentSession.stageIndex}</p>
+                    <h1 class="player-prep__title">${escapeHtml(currentSession.routineName)}</h1>
+                </div>
+
+                <p class="player-prep__copy">
+                    ${currentSession.sets.length} total sets across ${uniqueExerciseCount} ${exerciseLabel}. Review the session once, then start and stay in motion.
+                </p>
+
+                <section class="player-prep__summary">
+                    <p class="player-prep__summary-title">Session summary</p>
+                    <div class="player-prep__summary-list">
+                        ${exerciseSummary.map(([name, count]) => `
+                            <div class="player-prep__summary-row">
+                                <span>${escapeHtml(name)}</span>
+                                <span class="player-prep__summary-value">${count} set${count === 1 ? "" : "s"}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </section>
+
+                <div class="player-prep__actions">
+                    <button class="button button--primary player-prep__primary" style="background: ${currentSession.theme.color}; color: #000; border: none; box-shadow: 0 15px 40px ${currentSession.theme.color}55;" data-action="start" type="button">
+                        ${escapeHtml(startLabel)}
+                    </button>
+                    <button class="button button--tertiary" data-action="cancel-pre" type="button">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    wrapper.querySelector('[data-action="start"]').addEventListener('click', () => {
+        currentSession.sessionStartedAtIso = new Date().toISOString();
+        currentSession.status = 'active';
+        startSessionTimer(container);
+        renderUI(container, actions, state);
+    });
+    wrapper.querySelector('[data-action="cancel-pre"]')?.addEventListener("click", () => {
+      discardWorkoutPlayerSession();
+      actions.navigate("active-plans");
+    });
+    return;
+
+    if (false) {
     const { compact } = getPlayerViewport();
     const exerciseSummary = summarizeSessionExercises(currentSession.sets, state);
     const uniqueExerciseCount = exerciseSummary.length;
-    const exerciseLabel = uniqueExerciseCount === 1 ? 'Exercise' : 'Exercises';
+    const exerciseLabel = uniqueExerciseCount === 1 ? 'Activity' : 'Activities';
     const startLabel = currentSession.sessionType === "milestone_test" ? "START TEST" : "START ROUTINE";
 
     if (compact) {
@@ -488,6 +988,7 @@ function renderPreWorkout(wrapper, container, actions, state) {
       discardWorkoutPlayerSession();
       actions.navigate("active-plans");
     });
+    }
 }
 
 function renderHUD(wrapper, container, actions) {
@@ -550,9 +1051,10 @@ function renderPauseOverlay(wrapper, container, actions, state) {
 
     overlay.querySelector('[data-action="resume"]').addEventListener('click', () => {
         currentSession.isPaused = false;
-        // Resume rest timer if needed
         if (currentSession.status === 'resting' && currentSession.restRemaining > 0) {
             startRestInterval(container, actions, state);
+        } else if (currentSession.status === 'active' && isTimedWorkSet(currentSession.sets[currentSession.currentIndex])) {
+            startActiveWorkInterval(container, actions, state);
         }
         renderUI(container, actions, state);
     });
@@ -619,7 +1121,9 @@ function transitionToComplete(container, actions, state) {
 }
 
 function completeLoggedSet(status, content, container, actions, state) {
+  clearActiveWorkInterval();
   logSet(status, content);
+  resetActiveWorkState();
 
   if (currentSession.currentIndex >= currentSession.sets.length - 1) {
     transitionToComplete(container, actions, state);
@@ -637,53 +1141,161 @@ function renderActiveSet(content, container, actions, state) {
   }
 
   const exerciseName = getExerciseDisplayName(state, set.exerciseId);
+  const setDisplayTitle = getSetDisplayTitle(set);
+  const setProgressLabel = getSetProgressLabel(set);
 
   const { showReps, showWeight, showDuration, showResistance } = resolveSetInputs(set);
-  const { compact } = getPlayerViewport();
+  const { compact, veryNarrow } = getPlayerViewport();
+  const setFactsMarkup = renderSetFacts(set, { compact, collapseTempo: compact && veryNarrow });
+  const isTimedBlock = isTimedWorkSet(set);
+  const repsInput = resolveRepsInputConfig(set);
+
+  if (isTimedBlock) {
+    if (compact) {
+      content.innerHTML = `
+        <div data-role="timed-work" style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px 14px 24px; text-align: center; min-height: 100%; background: linear-gradient(180deg, rgba(79, 209, 197, 0.04), transparent 42%);">
+          <div style="width: 100%; max-width: 520px;">
+            <h1 style="font-size: 2.45rem; margin: 0 0 10px; line-height: 1.05; font-weight: 900; color: var(--text); text-align: center;">${escapeHtml(exerciseName)}</h1>
+            <div style="font-size: 1.02rem; color: var(--brand); font-weight: 800; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(setDisplayTitle)}</div>
+            ${setProgressLabel ? `<div style="font-size: 0.92rem; color: var(--soft); font-weight: 700; margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.06em;">${escapeHtml(setProgressLabel)}</div>` : `<div style="margin-bottom:18px;"></div>`}
+            ${setFactsMarkup}
+
+            <div style="padding: 22px 18px; border-radius: 24px; background: rgba(255,255,255,0.03); border: 1px solid rgba(143,168,210,0.14); margin-bottom: 18px;">
+              <div style="font-size: 0.82rem; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700;">Timed block</div>
+              <div id="work-timer" style="font-size: 3.8rem; font-weight: 900; line-height: 1; color: var(--brand-2); font-variant-numeric: tabular-nums; margin-bottom: 12px;">${formatTime(set.targetDurationSec || 0)}</div>
+              <div style="height: 10px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden;">
+                <div id="work-progress-fill" style="height: 100%; width: 0%; background: ${currentSession.theme.color}; transition: width 0.2s linear;"></div>
+              </div>
+              <div style="margin-top: 12px; color: var(--soft); font-size: 0.92rem;">Timer starts automatically and advances when it finishes.</div>
+            </div>
+
+            <div style="width: 100%;">
+              <button class="button button--primary" style="width: 100%; font-size: 1.4rem; font-weight: 900; padding: 18px; border-radius: 18px; margin-bottom: 12px; background: ${currentSession.theme.color}; color: #000; border: none;" data-action="complete">Finish Early</button>
+              <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+                <button class="button" style="font-size: 0.96rem; font-weight: 700; padding: 14px 10px; border-radius: 14px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.18); color: var(--text);" data-action="toggle-pause">Pause</button>
+                <button class="button" style="font-size: 0.96rem; font-weight: 700; padding: 14px 10px; border-radius: 14px; background: rgba(255, 193, 7, 0.9); color: #000; border: none;" data-action="fail">Partial</button>
+                <button class="button button--ghost" style="font-size: 0.96rem; padding: 14px 10px; border-radius: 14px; border: 2px solid rgba(255,255,255,0.15); color: var(--muted);" data-action="skip">Skip</button>
+              </div>
+            </div>
+
+            ${set.notes ? `
+              <div style="margin-top: 18px; text-align: center; color: var(--soft); font-size: 0.94rem; font-style: italic; opacity: 0.72;">
+                "${escapeHtml(set.notes)}"
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      `;
+    } else {
+      content.innerHTML = `
+        <div data-role="timed-work" style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; min-height: 100vh;">
+          <div style="width: 100%; max-width: 760px;">
+            <h1 style="font-size: 4.6rem; margin: 0 0 14px; line-height: 1; font-weight: 900; color: var(--text);">${escapeHtml(exerciseName)}</h1>
+            <div style="font-size: 1.8rem; color: var(--brand); font-weight: 800; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(setDisplayTitle)}</div>
+            ${setProgressLabel ? `<div style="font-size: 1.12rem; color: var(--soft); font-weight: 700; margin-bottom: 32px; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(setProgressLabel)}</div>` : `<div style="margin-bottom:32px;"></div>`}
+            ${setFactsMarkup}
+
+            <div style="padding: 34px 30px; border-radius: 28px; background: rgba(255,255,255,0.03); border: 1px solid rgba(143,168,210,0.14); margin-bottom: 28px;">
+              <div style="font-size: 0.95rem; color: var(--muted); margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700;">Timed block</div>
+              <div id="work-timer" style="font-size: 6rem; font-weight: 900; line-height: 1; color: var(--brand-2); font-variant-numeric: tabular-nums; margin-bottom: 18px;">${formatTime(set.targetDurationSec || 0)}</div>
+              <div style="height: 14px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; max-width: 540px; margin: 0 auto;">
+                <div id="work-progress-fill" style="height: 100%; width: 0%; background: ${currentSession.theme.color}; transition: width 0.2s linear;"></div>
+              </div>
+              <div style="margin-top: 16px; color: var(--soft); font-size: 1rem;">Timer starts automatically and advances when it finishes.</div>
+            </div>
+
+            <div style="width: 100%; max-width: 620px; margin: 0 auto;">
+              <button class="button button--primary" style="width: 100%; font-size: 2.1rem; font-weight: 900; padding: 28px; border-radius: 22px; margin-bottom: 18px; background: ${currentSession.theme.color}; color: #000; border: none;" data-action="complete">Finish Early</button>
+              <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">
+                <button class="button" style="font-size: 1.3rem; font-weight: 700; padding: 20px 16px; border-radius: 16px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.18); color: var(--text);" data-action="toggle-pause">Pause</button>
+                <button class="button" style="font-size: 1.3rem; font-weight: 700; padding: 20px 16px; border-radius: 16px; background: rgba(255, 193, 7, 0.9); color: #000; border: none;" data-action="fail">Partial</button>
+                <button class="button button--ghost" style="font-size: 1.3rem; padding: 20px 16px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.15); color: var(--muted);" data-action="skip">Skip</button>
+              </div>
+            </div>
+
+            ${set.notes ? `
+              <div style="margin-top: 24px; text-align: center; color: var(--soft); font-size: 1.02rem; font-style: italic; opacity: 0.72;">
+                "${escapeHtml(set.notes)}"
+              </div>
+            ` : ""}
+          </div>
+        </div>
+      `;
+    }
+
+    content.querySelector('[data-action="toggle-pause"]').addEventListener('click', () => {
+      currentSession.isPaused = true;
+      clearActiveWorkInterval();
+      renderUI(container, actions, state);
+    });
+    content.querySelector('[data-action="complete"]').addEventListener('click', () => {
+      completeLoggedSet('success', content, container, actions, state);
+    });
+    content.querySelector('[data-action="fail"]').addEventListener('click', () => {
+      completeLoggedSet('partial', content, container, actions, state);
+    });
+    content.querySelector('[data-action="skip"]').addEventListener('click', () => {
+      clearActiveWorkInterval();
+      logSet('skipped', null, { captureMetrics: false });
+      resetActiveWorkState();
+      currentSession.currentIndex++;
+      if (currentSession.currentIndex >= currentSession.sets.length) {
+        transitionToComplete(container, actions, state);
+        return;
+      }
+      currentSession.status = 'active';
+      renderUI(container, actions, state);
+    });
+
+    ensureTimedWorkState(container, actions, state, set);
+    return;
+  }
 
   if (compact) {
     content.innerHTML = `
-      <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 12px 12px 18px; text-align: center; min-height: 100%;">
+      <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding:${veryNarrow ? "10px 10px 16px" : "12px 12px 18px"}; text-align: center; min-height: 100%;">
         <div style="width: 100%; max-width: 520px;">
-          <h1 style="font-size: 2.45rem; margin: 0 0 10px; line-height: 1.05; font-weight: 900; color: var(--text); text-align: center;">${escapeHtml(exerciseName)}</h1>
-          <div style="font-size: 1.1rem; color: var(--brand); font-weight: 800; margin-bottom: 18px; text-transform: uppercase; letter-spacing: 0.08em;">Set ${set.setNumber} of ${set.totalSets}</div>
+          <h1 style="font-size: ${veryNarrow ? "2.1rem" : "2.45rem"}; margin: 0 0 ${veryNarrow ? "8px" : "10px"}; line-height: 1.05; font-weight: 900; color: var(--text); text-align: center;">${escapeHtml(exerciseName)}</h1>
+          <div style="font-size: ${veryNarrow ? "1rem" : "1.1rem"}; color: var(--brand); font-weight: 800; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(setDisplayTitle)}</div>
+          ${setProgressLabel ? `<div style="font-size: ${veryNarrow ? "0.84rem" : "0.92rem"}; color: var(--soft); font-weight: 700; margin-bottom: ${veryNarrow ? "12px" : "18px"}; text-transform: uppercase; letter-spacing: 0.06em;">${escapeHtml(setProgressLabel)}</div>` : `<div style="margin-bottom:${veryNarrow ? "12px" : "18px"};"></div>`}
+          ${setFactsMarkup}
 
-          <div style="width: 100%; margin-bottom: 22px;">
-            <div style="display: flex; gap: 12px; justify-content: center; align-items: end; flex-wrap: wrap;">
+          <div style="width: 100%; margin-bottom: ${veryNarrow ? "16px" : "22px"};">
+            <div style="display: flex; gap: ${veryNarrow ? "10px" : "12px"}; justify-content: center; align-items: end; flex-wrap: wrap;">
               ${showReps ? `
-                <div style="flex: 1 1 120px; text-align: center;">
-                  <div style="font-size: 0.82rem; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">Reps</div>
-                  <input type="number" id="log-reps" value="${set.targetReps || 0}" aria-label="Reps completed" style="font-size: 2.4rem; font-weight: 900; text-align: center; padding: 14px 10px; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: 138px; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
+                <div style="flex: 1 1 ${veryNarrow ? "108px" : "120px"}; text-align: center;">
+                  <div style="font-size: ${veryNarrow ? "0.74rem" : "0.82rem"}; color: var(--muted); margin-bottom: ${veryNarrow ? "8px" : "10px"}; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">${escapeHtml(repsInput.label)}</div>
+                  <input type="number" id="log-reps" value="${repsInput.value}" placeholder="${escapeHtml(repsInput.placeholder)}" aria-label="${escapeHtml(repsInput.label)}" style="font-size: ${veryNarrow ? "2rem" : "2.4rem"}; font-weight: 900; text-align: center; padding: ${veryNarrow ? "12px 8px" : "14px 10px"}; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: ${veryNarrow ? "126px" : "138px"}; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
                 </div>
               ` : ""}
               ${showWeight ? `
-                <div style="flex: 1 1 120px; text-align: center;">
-                  <div style="font-size: 0.82rem; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">Weight</div>
-                  <input type="number" id="log-weight" value="${set.targetWeightKg || 0}" step="0.5" aria-label="Weight in kg" style="font-size: 2.4rem; font-weight: 900; text-align: center; padding: 14px 10px; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: 138px; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="decimal">
+                <div style="flex: 1 1 ${veryNarrow ? "108px" : "120px"}; text-align: center;">
+                  <div style="font-size: ${veryNarrow ? "0.74rem" : "0.82rem"}; color: var(--muted); margin-bottom: ${veryNarrow ? "8px" : "10px"}; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">Weight</div>
+                  <input type="number" id="log-weight" value="${set.targetWeightKg || 0}" step="0.5" aria-label="Weight in kg" style="font-size: ${veryNarrow ? "2rem" : "2.4rem"}; font-weight: 900; text-align: center; padding: ${veryNarrow ? "12px 8px" : "14px 10px"}; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: ${veryNarrow ? "126px" : "138px"}; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="decimal">
                 </div>
               ` : ""}
               ${showDuration ? `
-                <div style="flex: 1 1 120px; text-align: center;">
-                  <div style="font-size: 0.82rem; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">Duration</div>
-                  <input type="number" id="log-duration" value="${set.targetDurationSec || 0}" aria-label="Duration in seconds" style="font-size: 2.4rem; font-weight: 900; text-align: center; padding: 14px 10px; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: 138px; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
+                <div style="flex: 1 1 ${veryNarrow ? "108px" : "120px"}; text-align: center;">
+                  <div style="font-size: ${veryNarrow ? "0.74rem" : "0.82rem"}; color: var(--muted); margin-bottom: ${veryNarrow ? "8px" : "10px"}; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">Duration</div>
+                  <input type="number" id="log-duration" value="${set.targetDurationSec || 0}" aria-label="Duration in seconds" style="font-size: ${veryNarrow ? "2rem" : "2.4rem"}; font-weight: 900; text-align: center; padding: ${veryNarrow ? "12px 8px" : "14px 10px"}; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: ${veryNarrow ? "126px" : "138px"}; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
                 </div>
               ` : ""}
             </div>
           </div>
 
           <div style="width: 100%;">
-            <button class="button button--primary" style="width: 100%; font-size: 1.7rem; font-weight: 900; padding: 22px; border-radius: 22px; margin-bottom: 14px; background: ${currentSession.theme.color}; color: #000; border: none; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28); transition: all 0.2s ease;" data-action="complete">COMPLETE SET</button>
+            <button class="button button--primary" style="width: 100%; font-size: ${veryNarrow ? "1.46rem" : "1.7rem"}; font-weight: 900; padding: ${veryNarrow ? "18px" : "22px"}; border-radius: 22px; margin-bottom: 14px; background: ${currentSession.theme.color}; color: #000; border: none; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28); transition: all 0.2s ease;" data-action="complete">COMPLETE SET</button>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
-              <button class="button" style="font-size: 1rem; font-weight: 700; padding: 15px 12px; border-radius: 16px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); color: var(--text); transition: all 0.2s ease;" data-action="toggle-pause">PAUSE</button>
-              <button class="button" style="font-size: 1rem; font-weight: 700; padding: 15px 12px; border-radius: 16px; background: rgba(255, 193, 7, 0.9); color: #000; border: none; transition: all 0.2s ease;" data-action="fail">PARTIAL</button>
+              <button class="button" style="font-size: ${veryNarrow ? "0.94rem" : "1rem"}; font-weight: 700; padding: ${veryNarrow ? "13px 10px" : "15px 12px"}; border-radius: 16px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); color: var(--text); transition: all 0.2s ease;" data-action="toggle-pause">PAUSE</button>
+              <button class="button" style="font-size: ${veryNarrow ? "0.94rem" : "1rem"}; font-weight: 700; padding: ${veryNarrow ? "13px 10px" : "15px 12px"}; border-radius: 16px; background: rgba(255, 193, 7, 0.9); color: #000; border: none; transition: all 0.2s ease;" data-action="fail">PARTIAL</button>
             </div>
 
-            <button class="button button--ghost" style="width: 100%; font-size: 0.98rem; padding: 14px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.15); color: var(--muted); transition: all 0.2s ease;" data-action="skip">Skip Set</button>
+            <button class="button button--ghost" style="width: 100%; font-size: ${veryNarrow ? "0.92rem" : "0.98rem"}; padding: ${veryNarrow ? "12px" : "14px"}; border-radius: 16px; border: 2px solid rgba(255,255,255,0.15); color: var(--muted); transition: all 0.2s ease;" data-action="skip">Skip Set</button>
           </div>
 
           ${set.notes ? `
-            <div style="margin-top: 20px; text-align: center; color: var(--soft); font-size: 0.98rem; font-style: italic; opacity: 0.72;">
+            <div style="margin-top: ${veryNarrow ? "14px" : "20px"}; text-align: center; color: var(--soft); font-size: ${veryNarrow ? "0.88rem" : "0.98rem"}; font-style: italic; opacity: 0.72;">
               "${escapeHtml(set.notes)}"
             </div>
           ` : ""}
@@ -732,15 +1344,17 @@ function renderActiveSet(content, container, actions, state) {
       <!-- Exercise Focus -->
       <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 800px;">
         <h1 style="font-size: 5rem; margin: 0 0 16px; line-height: 1; font-weight: 900; color: var(--text); text-align: center;">${escapeHtml(exerciseName)}</h1>
-        <div style="font-size: 2.2rem; color: var(--brand); font-weight: 800; margin-bottom: 60px; text-transform: uppercase; letter-spacing: 0.1em;">Set ${set.setNumber} of ${set.totalSets}</div>
+        <div style="font-size: 2.2rem; color: var(--brand); font-weight: 800; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.1em;">${escapeHtml(setDisplayTitle)}</div>
+        ${setProgressLabel ? `<div style="font-size: 1.2rem; color: var(--soft); font-weight: 700; margin-bottom: 40px; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(setProgressLabel)}</div>` : `<div style="margin-bottom:40px;"></div>`}
+        ${setFactsMarkup}
 
         <!-- Performance Inputs - Dominant -->
         <div style="width: 100%; max-width: 700px; margin-bottom: 80px;">
           <div style="display: flex; gap: 32px; justify-content: center; align-items: end;">
             ${showReps ? `
               <div style="flex: 1; text-align: center;">
-                <div style="font-size: 1.1rem; color: var(--muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Reps</div>
-                <input type="number" id="log-reps" value="${set.targetReps || 0}" aria-label="Reps completed" style="font-size: 4rem; font-weight: 900; text-align: center; padding: 24px 16px; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: 180px; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
+                <div style="font-size: 1.1rem; color: var(--muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">${escapeHtml(repsInput.label)}</div>
+                <input type="number" id="log-reps" value="${repsInput.value}" placeholder="${escapeHtml(repsInput.placeholder)}" aria-label="${escapeHtml(repsInput.label)}" style="font-size: 4rem; font-weight: 900; text-align: center; padding: 24px 16px; background: rgba(0,0,0,0.6); border: 3px solid rgba(143,168,210,0.3); border-radius: 16px; width: 100%; max-width: 180px; color: var(--text); outline: none; transition: all 0.2s ease;" inputmode="numeric" pattern="[0-9]*">
               </div>
             ` : ""}
             ${showWeight ? `
@@ -826,25 +1440,58 @@ function normalizeLoggedStatus(status) {
 function logSet(status, content, options = {}) {
   const set = currentSession.sets[currentSession.currentIndex];
   const captureMetrics = options.captureMetrics !== false;
-  const reps = content.querySelector("#log-reps")?.value;
-  const weight = content.querySelector("#log-weight")?.value;
-  const duration = content.querySelector("#log-duration")?.value;
+  const reps = content?.querySelector("#log-reps")?.value;
+  const weight = content?.querySelector("#log-weight")?.value;
+  const duration = content?.querySelector("#log-duration")?.value;
+  const parsedDuration = captureMetrics && duration ? parseInt(duration, 10) : null;
+  const resolvedDuration = captureMetrics
+    ? resolveLoggedDuration(set, Number.isFinite(parsedDuration) ? parsedDuration : null)
+    : null;
 
   currentSession.logs.push({
     exerciseId: set.exerciseId,
     setNumber: set.setNumber,
+    metricType: set.metricType ?? null,
+    side: set.side ?? null,
+    holdSeconds: set.holdSeconds ?? null,
+    tempoMode: set.tempoMode ?? null,
+    tempoSecondsPerRep: set.tempoSecondsPerRep ?? null,
+    tempoDownSeconds: set.tempoDownSeconds ?? null,
+    tempoBottomHoldSeconds: set.tempoBottomHoldSeconds ?? null,
+    tempoUpSeconds: set.tempoUpSeconds ?? null,
+    tempoTopHoldSeconds: set.tempoTopHoldSeconds ?? null,
+    tempoLabel: set.tempoLabel ?? null,
     status: normalizeLoggedStatus(status),
     actualReps: captureMetrics && reps ? parseInt(reps, 10) : null,
     actualWeightKg: captureMetrics && weight ? parseFloat(weight) : null,
-    actualDurationSec: captureMetrics && duration ? parseInt(duration, 10) : null,
+    actualDurationSec: resolvedDuration,
     actualResistance: captureMetrics ? (set.targetResistance ?? null) : null,
   });
 }
 
 function startRest(container, actions, state) {
+  clearActiveWorkInterval();
+  resetActiveWorkState();
   const set = currentSession.sets[currentSession.currentIndex];
+  currentSession.restPhase = "primary";
+  if (set?.restKind === "instruction") {
+    currentSession.status = 'resting';
+    currentSession.restRemaining = 0;
+    renderUI(container, actions, state);
+    return;
+  }
+
+  const resolvedRest = Number.isFinite(Number(set?.restSec))
+    ? Math.max(0, Number(set.restSec))
+    : 60;
+
+  if (resolvedRest <= 0) {
+    finishRest(container, actions, state);
+    return;
+  }
+
   currentSession.status = 'resting';
-  currentSession.restRemaining = set.restSec || 60;
+  currentSession.restRemaining = resolvedRest;
   
   startRestInterval(container, actions, state);
   renderUI(container, actions, state);
@@ -870,6 +1517,25 @@ function finishRest(container, actions, state) {
     clearInterval(restTimerInterval);
     restTimerInterval = null;
   }
+  const currentSet = currentSession.sets[currentSession.currentIndex];
+  const followupTransitionSeconds = Number.isFinite(Number(currentSet?.followupRestSec))
+    ? Math.max(0, Number(currentSet.followupRestSec))
+    : 0;
+
+  if (
+    currentSession.restPhase !== "followup"
+    && currentSet?.followupRestKind === "transition"
+    && followupTransitionSeconds > 0
+  ) {
+    currentSession.status = "resting";
+    currentSession.restPhase = "followup";
+    currentSession.restRemaining = followupTransitionSeconds;
+    startRestInterval(container, actions, state);
+    renderUI(container, actions, state);
+    return;
+  }
+
+  currentSession.restPhase = null;
   currentSession.currentIndex++;
   if (currentSession.currentIndex >= currentSession.sets.length) {
     transitionToComplete(container, actions, state);
@@ -881,24 +1547,60 @@ function finishRest(container, actions, state) {
 }
 
 function renderResting(content, container, actions, state) {
+  const currentSet = currentSession.sets[currentSession.currentIndex];
   const nextSet = currentSession.sets[currentSession.currentIndex + 1];
-  const nextSetName = nextSet ? getExerciseDisplayName(state, nextSet.exerciseId) : null;
+  const preview = resolveRestPreview(currentSet, nextSet, state);
+  if (currentSet?.restKind === "instruction") {
+    const cueLabel = String(preview.cue || currentSet?.transitionLabel || "Follow the next instruction.").trim();
+    const hasPreview = Boolean(preview.title);
+    content.innerHTML = `
+      <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px 18px 22px; text-align: center; min-height: 100%; background: linear-gradient(180deg, var(--bg) 0%, rgba(79, 209, 197, 0.015) 100%);">
+        <div style="width: 100%; max-width: 560px; padding: 28px; border-radius: 24px; background: rgba(255,255,255,0.03); border: 1px solid rgba(143,168,210,0.12);">
+          <div style="font-size: 1rem; color: var(--brand); font-weight: 800; text-transform: uppercase; letter-spacing: 0.18em; margin-bottom: 18px;">Instruction</div>
+          <div style="font-size: 2.4rem; font-weight: 900; line-height: 1.1; color: var(--text); margin-bottom: 16px;">${escapeHtml(cueLabel)}</div>
+          ${hasPreview ? `
+            <div style="color: var(--soft); margin-bottom: 24px; line-height: 1.5;">
+              Resume with ${escapeHtml(preview.title)}${preview.subtitle ? ` · ${escapeHtml(preview.subtitle)}` : ""}
+              ${preview.progress ? `<div style="margin-top:6px; font-size:0.92rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;">${escapeHtml(preview.progress)}</div>` : ""}
+            </div>
+          ` : ""}
+          <div style="display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+            <button class="button button--primary" data-action="continue-rest-instruction" type="button">Continue</button>
+            <button class="button button--ghost" data-action="toggle-pause" type="button">Pause</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    content.querySelector('[data-action="continue-rest-instruction"]').addEventListener('click', () => {
+      finishRest(container, actions, state);
+    });
+    content.querySelector('[data-action="toggle-pause"]').addEventListener('click', () => {
+      currentSession.isPaused = true;
+      renderUI(container, actions, state);
+    });
+    return;
+  }
+
+  const restHeading = getEffectiveRestKind(currentSet) === "transition" ? "Transition" : "Set Rest";
   const { compact } = getPlayerViewport();
 
   if (compact) {
     content.innerHTML = `
       <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 18px 14px 24px; text-align: center; min-height: 100%; background: linear-gradient(180deg, var(--bg) 0%, rgba(79, 209, 197, 0.02) 100%);">
         <div style="width: 100%; max-width: 520px;">
-          <div style="font-size: 1rem; color: var(--brand); font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; margin-bottom: 24px; opacity: 0.85;">Rest Period</div>
+          <div style="font-size: 1rem; color: var(--brand); font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; margin-bottom: 24px; opacity: 0.85;">${escapeHtml(restHeading)}</div>
 
           <div id="rest-timer" style="font-size: 4.2rem; font-weight: 900; line-height: 1; color: var(--brand); margin-bottom: 10px; font-variant-numeric: tabular-nums; text-shadow: 0 4px 20px rgba(79, 209, 197, 0.3);">${currentSession.restRemaining ?? 60}</div>
           <div style="font-size: 1rem; color: var(--soft); margin-bottom: 28px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;">seconds remaining</div>
 
           <div style="width: 100%; padding: 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(79, 209, 197, 0.1); margin-bottom: 28px;">
-            <div style="font-size: 0.82rem; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.1em; font-weight: 600;">Next Up</div>
-            ${nextSet ? `
-              <div style="font-size: 1.55rem; font-weight: 800; color: var(--text); margin-bottom: 8px;">${escapeHtml(nextSetName)}</div>
-              <div style="color: var(--brand); font-size: 1rem; font-weight: 700;">Set ${nextSet.setNumber} of ${nextSet.totalSets}</div>
+            <div style="font-size: 0.82rem; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.1em; font-weight: 600;">${escapeHtml(preview.heading)}</div>
+            ${preview.title ? `
+              <div style="font-size: 1.55rem; font-weight: 800; color: var(--text); margin-bottom: 8px;">${escapeHtml(preview.title)}</div>
+              ${preview.subtitle ? `<div style="color: var(--brand); font-size: 1rem; font-weight: 700;">${escapeHtml(preview.subtitle)}</div>` : ""}
+              ${preview.progress ? `<div style="margin-top: 6px; color: var(--muted); font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.06em;">${escapeHtml(preview.progress)}</div>` : ""}
+              ${preview.cue ? `<div style="margin-top: 10px; color: var(--soft); font-size: 0.92rem;">${escapeHtml(preview.cue)}</div>` : ""}
             ` : `
               <div style="font-size: 1.8rem; font-weight: 800; color: var(--brand);">Workout Complete</div>
             `}
@@ -928,20 +1630,22 @@ function renderResting(content, container, actions, state) {
   }
 
   content.innerHTML = `
-    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; min-height: 100vh; background: linear-gradient(180deg, var(--bg) 0%, rgba(79, 209, 197, 0.02) 100%);">
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; min-height: 100%; background: linear-gradient(180deg, var(--bg) 0%, rgba(79, 209, 197, 0.02) 100%);">
       <!-- Rest Timer - Calm and Focused -->
       <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 600px;">
-        <div style="font-size: 1.6rem; color: var(--brand); font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 40px; opacity: 0.8;">Rest Period</div>
+        <div style="font-size: 1.6rem; color: var(--brand); font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 40px; opacity: 0.8;">${escapeHtml(restHeading)}</div>
 
         <div id="rest-timer" style="font-size: 6rem; font-weight: 900; line-height: 1; color: var(--brand); margin-bottom: 16px; font-variant-numeric: tabular-nums; text-shadow: 0 4px 20px rgba(79, 209, 197, 0.3);">${currentSession.restRemaining ?? 60}</div>
         <div style="font-size: 1.3rem; color: var(--soft); margin-bottom: 60px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">seconds remaining</div>
 
         <!-- Next Exercise Preview - Subtle -->
         <div style="width: 100%; max-width: 500px; padding: 32px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px solid rgba(79, 209, 197, 0.1); margin-bottom: 60px;">
-          <div style="font-size: 0.9rem; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.1em; font-weight: 600;">Next Up</div>
-          ${nextSet ? `
-            <div style="font-size: 2rem; font-weight: 800; color: var(--text); margin-bottom: 8px;">${escapeHtml(nextSetName)}</div>
-            <div style="color: var(--brand); font-size: 1.1rem; font-weight: 700;">Set ${nextSet.setNumber} of ${nextSet.totalSets}</div>
+          <div style="font-size: 0.9rem; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.1em; font-weight: 600;">${escapeHtml(preview.heading)}</div>
+          ${preview.title ? `
+            <div style="font-size: 2rem; font-weight: 800; color: var(--text); margin-bottom: 8px;">${escapeHtml(preview.title)}</div>
+            ${preview.subtitle ? `<div style="color: var(--brand); font-size: 1.1rem; font-weight: 700;">${escapeHtml(preview.subtitle)}</div>` : ""}
+            ${preview.progress ? `<div style="margin-top: 8px; color: var(--muted); font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.08em;">${escapeHtml(preview.progress)}</div>` : ""}
+            ${preview.cue ? `<div style="margin-top: 14px; color: var(--soft); font-size: 1rem;">${escapeHtml(preview.cue)}</div>` : ""}
           ` : `
             <div style="font-size: 2rem; font-weight: 800; color: var(--brand);">Workout Complete</div>
           `}
@@ -1162,6 +1866,7 @@ function persistCompletedSession(actions, state, options = {}) {
         }
       : null,
     reflectionRating: options.reflectionRating ?? null,
+    feedbackResponses: Array.isArray(options.feedbackResponses) ? options.feedbackResponses : [],
     sets: buildSessionSetPayload(),
   };
 
@@ -1189,11 +1894,21 @@ function finishSessionAfterReflection(actions, state, options = {}) {
     return;
   }
 
-  if (currentSession?.persistedSessionId && options.reflectionRating != null) {
-    actions.updateSessionReflection(
-      currentSession.persistedSessionId,
-      options.reflectionRating,
-    );
+  if (currentSession?.persistedSessionId) {
+    const sessionPatch = {};
+    if (Object.prototype.hasOwnProperty.call(options, "reflectionRating")) {
+      sessionPatch.reflectionRating = options.reflectionRating ?? null;
+    }
+    if (Array.isArray(options.feedbackResponses)) {
+      sessionPatch.feedbackResponses = options.feedbackResponses;
+    }
+
+    if (Object.keys(sessionPatch).length) {
+      actions.updateSessionReflection(
+        currentSession.persistedSessionId,
+        sessionPatch,
+      );
+    }
   }
 
   if (options.advanceStage) {
@@ -1341,27 +2056,73 @@ function renderMilestoneCeremony(wrapper, actions, state, context) {
   });
 }
 
+function collectFeedbackResponses(wrapper) {
+  return [...wrapper.querySelectorAll("[data-feedback-prompt-id]")]
+    .map((field) => ({
+      promptId: field.dataset.feedbackPromptId || "",
+      label: field.dataset.feedbackLabel || "",
+      response: field.value.trim(),
+    }))
+    .filter((entry) => entry.response);
+}
+
 function renderReflection(wrapper, actions, state, options) {
+  const feedbackPrompts =
+    currentSession?.completionContext?.stage?.milestone?.feedbackPrompts ||
+    [];
   wrapper.innerHTML = `
     <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
       <h2 style="font-size: 2.8rem; margin-bottom: 48px; font-weight: 800; color: var(--text); line-height: 1.2;">How did this session feel today?</h2>
       <p style="color: var(--muted); margin: -24px 0 32px; line-height: 1.6;">Reflection is optional. The session is already saved, so you can rate it now or skip for later.</p>
-      
+      ${feedbackPrompts.length ? `
+        <div style="width: 100%; margin-bottom: 28px; padding: 24px; border-radius: 24px; background: rgba(255,255,255,0.03); border: 1px solid rgba(143,168,210,0.12); text-align: left;">
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 0.82rem; color: var(--brand); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; margin-bottom: 8px;">Session check-in</div>
+            <p style="color: var(--soft); margin: 0; line-height: 1.6;">Capture any symptom, sensation, or rehab-specific feedback this stage cares about. These notes are stored with the session for later review.</p>
+          </div>
+          <div style="display: grid; gap: 16px;">
+            ${feedbackPrompts.map((prompt) => `
+              <label style="display: grid; gap: 8px;">
+                <span style="font-weight: 700; color: var(--text);">${escapeHtml(prompt.label)}</span>
+                <textarea
+                  data-feedback-prompt-id="${escapeHtml(prompt.id)}"
+                  data-feedback-label="${escapeHtml(prompt.label)}"
+                  rows="3"
+                  style="width: 100%; min-height: 96px; border-radius: 18px; border: 1px solid rgba(143,168,210,0.18); background: rgba(10, 19, 39, 0.72); color: var(--text); padding: 14px 16px; resize: vertical;"
+                  placeholder="${escapeHtml(prompt.placeholder || "Write a short response...")}"
+                ></textarea>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+
       <div style="display: grid; gap: 20px; width: 100%;">
         <button class="button" style="padding: 32px; font-size: 1.8rem; border-radius: 24px; background: rgba(79, 209, 197, 0.08); color: var(--brand); border: 1px solid rgba(79, 209, 197, 0.2); font-weight: 800;" data-difficulty="strong">Strong</button>
         <button class="button" style="padding: 32px; font-size: 1.8rem; border-radius: 24px; background: rgba(255, 255, 255, 0.04); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.1); font-weight: 800;" data-difficulty="normal">Normal</button>
         <button class="button" style="padding: 32px; font-size: 1.8rem; border-radius: 24px; background: rgba(252, 129, 129, 0.08); color: var(--danger); border: 1px solid rgba(252, 129, 129, 0.2); font-weight: 800;" data-difficulty="difficult">Difficult</button>
       </div>
+      ${feedbackPrompts.length ? `
+        <button class="button button--ghost" style="margin-top: 20px; min-width: 260px;" data-action="save-feedback-only" type="button">Save feedback without rating</button>
+      ` : ""}
       <button class="button button--ghost" style="margin-top: 20px; min-width: 220px;" data-action="skip-reflection" type="button">Skip for now</button>
     </div>
   `;
 
   wrapper.querySelectorAll('[data-difficulty]').forEach(btn => {
     btn.addEventListener('click', () => {
+      const feedbackResponses = collectFeedbackResponses(wrapper);
       finishSessionAfterReflection(actions, state, {
         ...options,
         reflectionRating: btn.dataset.difficulty,
+        feedbackResponses,
       });
+    });
+  });
+  wrapper.querySelector('[data-action="save-feedback-only"]')?.addEventListener("click", () => {
+    finishSessionAfterReflection(actions, state, {
+      ...options,
+      feedbackResponses: collectFeedbackResponses(wrapper),
     });
   });
   wrapper.querySelector('[data-action="skip-reflection"]')?.addEventListener("click", () => {

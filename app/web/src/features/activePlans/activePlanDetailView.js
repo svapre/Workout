@@ -1,24 +1,41 @@
-/**
- * Active Plan Detail View
- *
- * Detailed breakdown of a specific active plan instance.
- */
-
 import { getNextRoutine } from "./activePlanUtils.js";
-import { buildJourneyContext } from "./journeyContext.js";
 import { evaluateStageProgress } from "../plans/progressionEngine.js";
+import { buildStageStudyModel } from "../plans/stageStudy.js";
+import { enhanceStageJourneyModel, renderJourneyNode } from "../plans/journeyNodes.js";
 import { confirmAction } from "../../ui/modal.js";
 
-function escapeHtml(str) {
-  return String(str ?? "")
+function escapeHtml(value) {
+  return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
 
+function parseRouteId(route) {
+  return String(route || "").split("/")[1] || "";
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "Unknown time";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatEligibilityDescriptor(progress) {
-  const { eligibility } = progress;
+  const eligibility = progress.eligibility || {};
 
   if (eligibility.type === "none") {
     return progress.requiresTest
@@ -31,18 +48,15 @@ function formatEligibilityDescriptor(progress) {
   }
 
   if (eligibility.requiresContinuous) {
-    return `Unlock after ${eligibility.target} consecutive ${eligibility.target === 1 ? "cycle" : "cycles"}.`;
+    return `Unlock after ${eligibility.target} consecutive cycle completion${eligibility.target === 1 ? "" : "s"}.`;
   }
 
-  return `Unlock after ${eligibility.target} ${eligibility.target === 1 ? "cycle" : "cycles"} in this stage.`;
+  return `Unlock after ${eligibility.target} cycle completion${eligibility.target === 1 ? "" : "s"} in this stage.`;
 }
 
 function formatMilestoneDescriptor(progress) {
   if (progress.requiresTest && progress.test.exerciseId) {
-    if (progress.isComplete) {
-      return `Milestone passed: ${progress.summaryText}`;
-    }
-    return progress.isReadyForTest
+    return progress.isReadyForTest || progress.isComplete
       ? `Test unlocked: ${progress.summaryText}`
       : `Milestone test: ${progress.summaryText}`;
   }
@@ -50,116 +64,134 @@ function formatMilestoneDescriptor(progress) {
   return formatEligibilityDescriptor(progress);
 }
 
-function resolveProgressMeter(progress) {
-  if (progress.requiresTest) {
-    const target =
-      progress.eligibility.type === "none"
-        ? 1
-        : Math.max(1, Number(progress.eligibility.target ?? 1));
-    const current =
-      progress.eligibility.type === "none"
-        ? (progress.isReadyForTest || progress.isComplete ? 1 : 0)
-        : Math.max(0, Number(progress.eligibility.current ?? 0));
-    return { current, target };
-  }
-
-  if (progress.target == null || Number(progress.target) === 0) {
-    return { current: progress.isComplete ? 1 : 0, target: 1 };
-  }
-
-  return {
-    current: Math.max(0, Number(progress.current ?? 0)),
-    target: Math.max(1, Number(progress.target ?? 1)),
-  };
+function buildRecentSessions(planId, workouts = [], routines = []) {
+  const routineIndex = new Map((routines || []).map((routine) => [routine.id, routine]));
+  return (workouts || [])
+    .filter((workout) => workout.activePlanId === planId)
+    .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0))
+    .slice(0, 5)
+    .map((workout) => ({
+      id: workout.id,
+      completedAt: workout.completedAt,
+      sessionType: workout.sessionType || "routine",
+      title:
+        workout.sessionType === "milestone_test"
+          ? "Milestone test"
+          : routineIndex.get(workout.routineId)?.name || workout.routineName || "Routine session",
+      reflectionRating: workout.reflectionRating,
+    }));
 }
 
-function formatStaticMilestoneDescriptor(stage, exercises) {
-  const milestone = stage?.milestone || {};
-  const test = milestone.test || {};
-  const eligibility = milestone.eligibility || {
-    type: "cycles",
-    target: 1,
-    requiresContinuous: false,
-  };
-
-  if (test.type === "exercise" && test.exerciseId) {
-    const exerciseName =
-      exercises.find((exercise) => exercise.id === test.exerciseId)?.name || "target exercise";
-    const metricLabel = test.metric === "duration" ? "seconds" : "reps";
-    return `Milestone test: ${test.target ?? 1} ${metricLabel} on ${exerciseName}`;
-  }
-
-  if (eligibility.type === "sessions") {
-    return `Unlock after ${eligibility.target ?? 1} session${Number(eligibility.target ?? 1) === 1 ? "" : "s"}.`;
-  }
-
-  if (eligibility.type === "none") {
-    return "Milestone test can be attempted any time.";
-  }
-
-  return `Unlock after ${eligibility.target ?? 1} cycle${Number(eligibility.target ?? 1) === 1 ? "" : "s"}.`;
+function bindJourneyNode(node, handler) {
+  node.addEventListener("click", handler);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handler();
+    }
+  });
 }
 
-function formatProgressText(progress) {
-  return progress.progressText;
+function formatSessionFeel(value) {
+  const cleanValue = String(value ?? "").trim();
+  if (!cleanValue) {
+    return "Not rated";
+  }
+  return cleanValue.charAt(0).toUpperCase() + cleanValue.slice(1);
 }
 
-function renderJourneySequence(stage, routines) {
-  const items =
-    stage.schedule?.map((entry) => {
-      if (entry.type === "rest") {
-        return `<span class="journey-rotation__item journey-rotation__item--rest">Rest Step</span>`;
-      }
+function renderCompactRoadmap(stageModels = [], options = {}) {
+  if (!stageModels.length) {
+    return `<p class="muted">${escapeHtml(options.emptyText || "No stages defined yet.")}</p>`;
+  }
 
-      const routine = routines.find((candidate) => candidate.id === entry.routineId);
-      return `<span class="journey-rotation__item">${escapeHtml(routine?.name || "Workout")}</span>`;
-    }) || [];
+  const hiddenObjectiveStageIds = new Set(options.hiddenObjectiveStageIds || []);
 
-  return items.length ? items.join('<span class="journey-rotation__separator">/</span>') : "No schedule";
+  return `
+    <div class="journey-path journey-path--compact">
+      ${stageModels.map((model) => renderJourneyNode(model, {
+        actionName: "open-active-plan-study",
+        interactive: true,
+        actionKind: "navigate",
+        affordanceLabel: "Study stage",
+        actionHintLabel: "Tap this stage to open Study",
+        compact: true,
+        showObjective: !hiddenObjectiveStageIds.has(model.id),
+        showSequence: false,
+        showEstimate: false,
+      })).join("")}
+    </div>
+  `;
+}
+
+function describeStagePurpose(stage, { isRest = false, canTakeMilestoneTest = false } = {}) {
+  if (stage?.guidance) {
+    return stage.guidance;
+  }
+
+  if (canTakeMilestoneTest) {
+    return "Milestone conditions are met. Run the test when you are ready to validate this stage.";
+  }
+
+  if (isRest) {
+    return "Use the current rest step exactly as written so the plan cadence stays intact.";
+  }
+
+  return "Complete this stage with steady form until the milestone clears.";
+}
+
+function describeUnlockLine(progress, nextStage, { canAdvanceStage = false, canArchivePlan = false } = {}) {
+  if (canAdvanceStage) {
+    return `${nextStage?.name || "Next stage"} is unlocked now.`;
+  }
+
+  if (canArchivePlan) {
+    return "Final stage complete. Archive this journey or keep reinforcing the last stage.";
+  }
+
+  if (progress.requiresTest && progress.test.exerciseId) {
+    return progress.isReadyForTest || progress.isComplete
+      ? `Milestone test ready: ${progress.summaryText}`
+      : `Milestone gate: ${progress.summaryText}`;
+  }
+
+  if (nextStage?.name) {
+    return `${formatEligibilityDescriptor(progress).replace(/^Unlock/, `Unlock ${nextStage.name}`)}`;
+  }
+
+  return formatMilestoneDescriptor(progress);
 }
 
 export function renderActivePlanDetailView(container, { state, actions }) {
-  const existingCta = document.querySelector(".journey-cta-zone");
-  if (existingCta) {
-    existingCta.remove();
-  }
-
-  const hash = window.location.hash.replace(/^#\/?/, "");
-  const id = hash.split("/")[1];
-  const plan = state.activePlans.find((entry) => entry.id === id);
-
-  container.innerHTML = "";
-
-  const section = document.createElement("section");
-  section.className = "page page-single";
+  const planId = parseRouteId(state.route);
+  const plan = (state.activePlans || []).find((entry) => entry.id === planId) || null;
 
   if (!plan) {
-    section.innerHTML = `
-      <div class="panel panel--section">
-        <div class="panel__body" style="padding: 40px; text-align: center;">
-          <h1 style="color: var(--danger);">Plan not found</h1>
-          <p style="color: var(--soft); margin-bottom: 24px;">The active plan you are looking for does not exist or has been removed.</p>
-          <button class="button button--ghost" data-action="apd-back" type="button">Back to Dashboard</button>
-        </div>
-      </div>
+    container.innerHTML = `
+      <section class="page page-single">
+        <section class="panel panel--section">
+          <div class="panel__body">
+            <div class="empty-state">
+              <h3>Plan not found</h3>
+              <p>The active plan you are looking for does not exist or has been removed.</p>
+            </div>
+          </div>
+        </section>
+      </section>
     `;
-    container.appendChild(section);
-    section.querySelector('[data-action="apd-back"]')?.addEventListener("click", () => {
-      actions.navigate("active-plans");
-    });
     return;
   }
 
   const stageIndex = plan.currentStageIndex ?? 0;
-  const currentStage = plan.stages?.[stageIndex] || { name: "Unknown Stage", milestone: {} };
+  const currentStage = plan.stages?.[stageIndex] || { name: "Unknown Stage", guidance: "" };
   const nextStage = plan.stages?.[stageIndex + 1] || null;
   const nextRoutine = getNextRoutine(plan, state.routines);
-  const rawTheme = plan.theme || { color: "#4FD1C5", icon: "PL" };
+  const isRest = !nextRoutine;
+  const rawTheme = plan.theme || {};
   const theme = {
     color: rawTheme.color || "#4FD1C5",
-    icon: /Ã°|ð/.test(String(rawTheme.icon ?? "PL")) ? "PL" : String(rawTheme.icon ?? "PL"),
+    icon: String(rawTheme.icon || "PL"),
   };
-  const isRest = !nextRoutine;
   const stageProgress = evaluateStageProgress(
     currentStage,
     state.workouts || [],
@@ -167,194 +199,210 @@ export function renderActivePlanDetailView(container, { state, actions }) {
     plan,
     state.exercises || [],
   );
-  const journeyContext = buildJourneyContext({
-    plan,
-    workouts: state.workouts,
-    routines: state.routines,
-    exercises: state.exercises,
-  });
+  const recentSessions = buildRecentSessions(plan.id, state.workouts, state.routines);
+  const stageModels = (plan.stages || []).map((stage, index) => enhanceStageJourneyModel(
+    buildStageStudyModel(stage, state.routines || [], state.exercises || [], {
+      isCurrent: index === stageIndex,
+      stateLabel: index < stageIndex ? "Completed" : index === stageIndex ? "Current" : "Locked",
+    }),
+    {
+      sequenceIndex: index + 1,
+      pathState: index < stageIndex ? "complete" : index === stageIndex ? "current" : "locked",
+    },
+  ));
 
-  const { current: progressCurrent, target: progressTarget } = resolveProgressMeter(stageProgress);
   const canTakeMilestoneTest = stageProgress.isReadyForTest;
   const isStageComplete = stageProgress.isComplete;
   const canAdvanceStage = isStageComplete && Boolean(nextStage);
   const canArchivePlan = isStageComplete && !nextStage;
   const defaultAction = isRest
     ? { type: "rest", label: "Complete rest step" }
-    : { type: "session", label: "Start session" };
+    : { type: "session", label: "Start workout" };
   const primaryAction = canAdvanceStage
-    ? {
-        type: "advance",
-        label: nextStage ? `Advance to ${nextStage.name || "Next Stage"}` : "Advance stage",
-      }
+    ? { type: "advance", label: `Advance to ${nextStage.name || "Next stage"}` }
     : canArchivePlan
       ? { type: "archive", label: "Archive plan" }
-    : canTakeMilestoneTest
-      ? { type: "test", label: "Take milestone test" }
-      : defaultAction;
+      : canTakeMilestoneTest
+        ? { type: "test", label: "Take milestone test" }
+        : defaultAction;
   const secondaryAction = canAdvanceStage || canArchivePlan
     ? { ...defaultAction, label: "Continue current stage" }
     : canTakeMilestoneTest
       ? defaultAction
       : null;
-  const progressPct = isStageComplete
-    ? 100
-    : Math.min(100, Math.round((progressCurrent / progressTarget) * 100));
-  const progressLabel = isStageComplete
-    ? "Status"
-    : stageProgress.requiresTest
-      ? "Eligibility"
-      : "Progress";
-  const progressValue = canAdvanceStage
-    ? nextStage
-      ? `Ready to advance to ${nextStage.name || "Next Stage"}`
-      : "Stage milestone complete"
+
+  const stageCount = Math.max(plan.stages?.length || 1, 1);
+  const stageStateLabel = canAdvanceStage
+    ? "Ready to advance"
     : canArchivePlan
-      ? "Final stage complete"
-    : formatProgressText(stageProgress);
-  const missionTitle = canAdvanceStage
-    ? "Milestone reached"
+      ? "Plan complete"
+      : canTakeMilestoneTest
+        ? "Milestone test ready"
+        : isRest
+          ? "Rest step"
+          : "Current stage";
+  const progressLabel = stageProgress.requiresTest ? "Eligibility" : "Progress";
+  const stageLine = `Stage ${stageIndex + 1} of ${stageCount}`;
+  const stagePurpose = describeStagePurpose(currentStage, { isRest, canTakeMilestoneTest });
+  const unlockLine = describeUnlockLine(stageProgress, nextStage, { canAdvanceStage, canArchivePlan });
+  const nextActionLine = canAdvanceStage
+    ? `Advance to ${nextStage?.name || "the next stage"} whenever you are ready.`
     : canArchivePlan
-      ? "Stage complete"
-    : canTakeMilestoneTest
-      ? "Milestone ready"
-      : isRest
-        ? "Scheduled rest"
-        : "Current mission";
-  const milestoneDescription = canAdvanceStage
-    ? nextStage
-      ? `${currentStage.name || "This stage"} is complete. Advance when you are ready, or continue repeating this stage.`
-      : `${currentStage.name || "This stage"} is complete. Continue the current stage whenever you want to keep reinforcing it.`
-    : canArchivePlan
-      ? `${currentStage.name || "This stage"} is complete. Archive the plan to move it out of your active queue, or keep the current stage active if you want to continue repeating it.`
-    : isRest
-      ? "This schedule step has no routine attached. Complete it when you are ready to move forward."
-      : currentStage.milestone?.description || stageProgress.summaryText || "Build strength and consistency.";
+      ? "This journey has reached its final unlock. Archive it or keep the last stage active."
+      : canTakeMilestoneTest
+        ? "The milestone test is ready. Run it now or continue reinforcing this stage first."
+        : isRest
+          ? "No routine is scheduled here. Complete the rest step when you are ready to move on."
+          : nextRoutine?.name
+            ? `Next session: ${nextRoutine.name}`
+            : "Continue the current stage when you are ready.";
+  const baseCurrentStageModel = stageModels[stageIndex] || enhanceStageJourneyModel(buildStageStudyModel(currentStage, state.routines || [], state.exercises || []), {
+      sequenceIndex: stageIndex + 1,
+      pathState: "current",
+    });
+  const currentStageModel = {
+    ...baseCurrentStageModel,
+    objectiveLine: baseCurrentStageModel.objectiveLine || stagePurpose,
+    milestoneLine: unlockLine,
+    stateLabel: stageStateLabel,
+  };
+  const laterStageModels = stageModels.filter((model) => model.id !== currentStageModel.id);
 
-  section.style.setProperty("--plan-color", theme.color);
-
-  section.innerHTML = `
-    <div class="journey-hero" style="--plan-color: ${theme.color};">
-      <button class="button button--ghost journey-back-btn" data-action="apd-back" type="button">Back</button>
-      <div class="journey-hero__icon">${escapeHtml(theme.icon)}</div>
-      <h1 class="journey-hero__title">${escapeHtml(plan.displayName || plan.name)}</h1>
-      <p class="journey-hero__goal">${escapeHtml(plan.goal || plan.description || "Training for excellence.")}</p>
-      <p class="journey-hero__insight">${escapeHtml(journeyContext.currentFocus)}</p>
-      <div class="journey-hero__status">
-        ${journeyContext.recentAchievement ? `<div class="journey-hero__achievement">${escapeHtml(journeyContext.recentAchievement)}</div>` : ""}
-        <div class="journey-hero__stage">${escapeHtml(currentStage.name)}</div>
-        <div class="journey-hero__next">${escapeHtml(journeyContext.nextMeaningfulEvent)}</div>
-      </div>
-    </div>
-
-    <div class="journey-path">
-      ${plan.stages
-        .map((stage, index) => {
-          const isComplete = index < stageIndex;
-          const isCurrent = index === stageIndex;
-          const nodeClass = isComplete
-            ? "journey-node--complete"
-            : isCurrent
-              ? "journey-node--current"
-              : "journey-node--locked";
-          const icon = isComplete ? "&#10003;" : isCurrent ? "&#9679;" : "&#128274;";
-          const milestoneText = isComplete
-            ? ""
-            : isCurrent
-              ? formatMilestoneDescriptor(stageProgress)
-              : formatStaticMilestoneDescriptor(stage, state.exercises || []);
-          const descText = isComplete ? "" : stage.milestone?.description || "Progress through this stage.";
-
-          return `
-            <div class="journey-node ${nodeClass}" ${isCurrent ? `style="--plan-color: ${theme.color};"` : ""}>
-              <div class="journey-node__icon">${icon}</div>
-              <div class="journey-node__content">
-                <h3 class="journey-node__title">${escapeHtml(stage.name)}</h3>
-                ${descText ? `<p class="journey-node__desc">${escapeHtml(descText)}</p>` : ""}
-                ${milestoneText ? `<p class="journey-node__milestone">${escapeHtml(milestoneText)}</p>` : ""}
-              </div>
-            </div>
-            ${index < plan.stages.length - 1 ? '<div class="journey-connector"></div>' : ""}
-          `;
-        })
-        .join("")}
-    </div>
-
-    <div class="journey-current-stage ${isRest ? "journey-current-stage--rest" : ""}">
-      <h2 class="journey-section-title">${escapeHtml(missionTitle)}</h2>
-      <p class="journey-current-desc">${escapeHtml(milestoneDescription)}</p>
-
-      <div class="journey-progress">
-        <div class="journey-progress__label">${progressLabel}</div>
-        <div class="journey-progress__value">${escapeHtml(progressValue)}</div>
-        <div class="journey-progress__bar">
-          <div class="journey-progress__fill" style="width: ${progressPct}%; background: ${theme.color};"></div>
-        </div>
-      </div>
-
-      ${isStageComplete ? `
-        <div style="margin-top: 16px; padding: 18px 20px; background: ${theme.color}12; border: 1px solid ${theme.color}33; border-radius: 20px;">
-          <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; color: ${theme.color}; font-weight: 800; margin-bottom: 8px;">${canAdvanceStage ? "Stage ready" : "Plan complete"}</div>
-          <div style="color: var(--text); line-height: 1.55;">
-            ${escapeHtml(canAdvanceStage
-              ? `${currentStage.name || "This stage"} is complete. Advance to ${nextStage.name || "the next stage"} now, or keep this stage active and continue the current plan.`
-              : `${currentStage.name || "This stage"} is complete. Archive this plan to keep it in history without leaving it active, or continue the current stage whenever you want to repeat it.`)}
+  container.innerHTML = `
+    <section class="page page-single">
+      <div class="journey-hero journey-hero--compact journey-hero--strip" style="--plan-color: ${theme.color};">
+        <div class="journey-hero__compact-top">
+          <div class="journey-hero__icon">${escapeHtml(theme.icon)}</div>
+          <div class="journey-hero__identity">
+            <span class="panel__eyebrow">Active plan</span>
+            <h1 class="journey-hero__title">${escapeHtml(plan.displayName || plan.name)}</h1>
+            <p class="journey-hero__summary">${escapeHtml(`${stageLine} / active plan`)}</p>
           </div>
         </div>
-      ` : ""}
-
-      ${stageProgress.requiresTest ? `
-        <div class="journey-rotation" style="margin-top: 16px;">
-          <div class="journey-rotation__label">Milestone test</div>
-          <div class="journey-rotation__schedule">${escapeHtml(stageProgress.summaryText || "No test configured.")}</div>
-        </div>
-      ` : ""}
-
-      <div class="journey-rotation">
-        <div class="journey-rotation__label">Journey sequence</div>
-        <div class="journey-rotation__schedule">
-          ${renderJourneySequence(currentStage, state.routines || [])}
-        </div>
       </div>
 
-      <div class="journey-cta-zone">
-        <div style="display: grid; gap: 12px; width: min(100%, 420px); margin: 0 auto;">
-          <button class="button button--primary journey-cta-large" data-action="apd-resume" type="button" style="background: ${theme.color}; color: #000; border: none; box-shadow: 0 10px 24px ${theme.color}55;">
-            ${escapeHtml(primaryAction.label)}
-          </button>
-          ${secondaryAction ? `
-            <button class="button button--ghost" data-action="apd-secondary" type="button" style="border-color: ${theme.color}44; color: ${theme.color};">
-              ${escapeHtml(secondaryAction.label)}
-            </button>
-          ` : ""}
-          <button class="button button--ghost" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-edit" type="button">
-            Edit live plan
-          </button>
-          <button class="button button--ghost" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-import" type="button">
-            Import revision
-          </button>
-          <button class="button button--ghost" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-export" type="button">
-            Export active plan
-          </button>
-          ${primaryAction.type !== "archive" ? `
-            <button class="button button--ghost" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-archive" type="button">
-              Archive plan
-            </button>
-          ` : ""}
-          <button class="button button--ghost" style="border-color: rgba(255,255,255,0.18); color: var(--soft);" data-action="apd-remove" type="button">
-            Remove from active list
-          </button>
-          <input type="file" accept=".json,application/json" data-action="apd-import-file" style="display:none;">
+      <section class="panel panel--section">
+        <div class="panel__header">
+          <div>
+            <span class="panel__eyebrow">Now</span>
+            <h2 class="panel__title">Current stage</h2>
+          </div>
         </div>
+        <div class="panel__body stack">
+          <div class="journey-now-card" style="--plan-color: ${theme.color}; border-color: ${theme.color}33; box-shadow: inset 0 0 0 1px ${theme.color}11;">
+            ${renderJourneyNode(currentStageModel, {
+              showIndex: true,
+              showStateBadge: true,
+              showSequence: false,
+              showEstimate: false,
+            })}
+          </div>
+
+          <div class="journey-cta-zone">
+            <div class="journey-cta-actions">
+              <button class="button button--primary journey-cta-large" data-action="apd-primary" type="button" style="background: ${theme.color}; color: #000; border: none; box-shadow: 0 10px 24px ${theme.color}55;">
+                ${escapeHtml(primaryAction.label)}
+              </button>
+              ${secondaryAction ? `
+                <button class="button button--secondary" data-action="apd-secondary" type="button" style="border-color: ${theme.color}44; color: ${theme.color};">
+                  ${escapeHtml(secondaryAction.label)}
+                </button>
+              ` : ""}
+              <button class="button button--ghost" data-action="study-plan" type="button">View plan guide</button>
+              <input type="file" accept=".json,application/json" data-action="apd-import-file" style="display:none;">
+            </div>
+          </div>
+
+
+        </div>
+      </section>
+
+      <section class="panel panel--section">
+        <div class="panel__header">
+          <div>
+            <span class="panel__eyebrow">Stages</span>
+            <h2 class="panel__title">Later stages</h2>
+          </div>
+        </div>
+        <div class="panel__body" style="--plan-color: ${theme.color};">
+          ${renderCompactRoadmap(laterStageModels, { emptyText: "No later stages in this plan yet." })}
+        </div>
+      </section>
+
+      <section class="panel panel--section">
+        <div class="panel__header">
+          <div>
+            <span class="panel__eyebrow">Recent activity</span>
+            <h2 class="panel__title">Recent sessions</h2>
+            <p class="panel__copy">Recent sessions from this active plan stay here. Open History when you want the full timeline.</p>
+          </div>
+          <div class="panel__header-actions">
+            <button class="button button--secondary" data-action="apd-history" type="button">Open history</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          ${recentSessions.length ? `
+            <div class="timeline-list">
+              ${recentSessions.map((session, index) => `
+                <button class="timeline-item timeline-item--button" type="button" data-action="apd-session" data-session-id="${session.id}">
+                  <div class="timeline-item__row">
+                    <div class="timeline-item__index">${index + 1}</div>
+                    <div class="timeline-item__content">
+                      <h3 class="timeline-item__title">${escapeHtml(session.title)}</h3>
+                      <div class="timeline-item__badges">
+                        <span class="badge badge--muted">${escapeHtml(formatDateTime(session.completedAt))}</span>
+                        <span class="badge badge--muted">${escapeHtml(session.sessionType === "milestone_test" ? "Milestone test" : "Routine session")}</span>
+                        ${session.reflectionRating ? `<span class="badge badge--accent">Felt ${escapeHtml(formatSessionFeel(session.reflectionRating).toLowerCase())}</span>` : ""}
+                      </div>
+                    </div>
+                    <span class="timeline-item__nav">Open in History &rsaquo;</span>
+                  </div>
+                </button>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">No completed sessions for this plan yet.</p>`}
+        </div>
+      </section>
+
+      <div class="journey-support-grid">
+        <details class="journey-advanced">
+          <summary class="journey-advanced__summary">Plan tools</summary>
+          <div class="journey-advanced__content">
+            <p class="journey-support-panel__copy">Update the live plan or bring in plan updates without crowding the current focus view.</p>
+            <div class="action-stack">
+              <button class="button button--secondary" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-edit" type="button">
+                Edit live plan
+              </button>
+              <button class="button button--secondary" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-import" type="button">
+                Import plan update
+              </button>
+              <button class="button button--secondary" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-export" type="button">
+                Export active plan
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <details class="journey-advanced journey-advanced--danger">
+          <summary class="journey-advanced__summary">Plan status</summary>
+          <div class="journey-advanced__content">
+            <p class="journey-support-panel__copy">These actions change whether the plan stays in your live queue. History snapshots and completed sessions stay reviewable either way.</p>
+            <div class="action-stack">
+              ${primaryAction.type !== "archive" ? `
+                <button class="button button--secondary" style="border-color: ${theme.color}44; color: ${theme.color};" data-action="apd-archive" type="button">
+                  Archive plan
+                </button>
+              ` : ""}
+              <button class="button button--danger" data-action="apd-remove" type="button">
+                Remove from active list
+              </button>
+            </div>
+          </div>
+        </details>
       </div>
-    </div>
+    </section>
   `;
 
-  container.appendChild(section);
-
-  section.querySelector('[data-action="apd-back"]')?.addEventListener("click", () => {
-    actions.navigate("active-plans");
-  });
   const runDefaultAction = () => {
     if (defaultAction.type === "rest") {
       actions.completeRestDay(plan.id);
@@ -363,7 +411,8 @@ export function renderActivePlanDetailView(container, { state, actions }) {
 
     actions.navigate(`workout-player/${plan.id}`);
   };
-  section.querySelector('[data-action="apd-resume"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="apd-primary"]')?.addEventListener("click", () => {
     if (primaryAction.type === "advance") {
       actions.advanceStage(plan.id);
       return;
@@ -388,26 +437,61 @@ export function renderActivePlanDetailView(container, { state, actions }) {
     }
     runDefaultAction();
   });
-  section.querySelector('[data-action="apd-secondary"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="apd-secondary"]')?.addEventListener("click", () => {
     runDefaultAction();
   });
-  section.querySelector('[data-action="apd-edit"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="study-plan"]')?.addEventListener("click", () => {
+    actions.openActivePlanStudy(plan.id, "", state.route);
+  });
+
+  container.querySelectorAll('[data-action="open-active-plan-study"]').forEach((button) => {
+    bindJourneyNode(button, () => {
+      actions.openActivePlanStudy(plan.id, button.dataset.stageId, state.route);
+    });
+  });
+
+  container.querySelectorAll('[data-action="open-routine"]').forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      actions.openRoutineDetail(button.dataset.routineId, state.route);
+    });
+  });
+
+  container.querySelector('[data-action="apd-history"]')?.addEventListener("click", () => {
+    actions.viewHistoryForPlan(plan.id);
+  });
+
+  container.querySelectorAll('[data-action="apd-session"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      actions.selectWorkout(button.dataset.sessionId);
+      actions.viewHistoryForPlan(plan.id);
+    });
+  });
+
+  container.querySelector('[data-action="apd-edit"]')?.addEventListener("click", () => {
     actions.beginActivePlanEdit(plan.id);
   });
-  section.querySelector('[data-action="apd-import"]')?.addEventListener("click", () => {
-    section.querySelector('[data-action="apd-import-file"]')?.click();
+
+  container.querySelector('[data-action="apd-import"]')?.addEventListener("click", () => {
+    container.querySelector('[data-action="apd-import-file"]')?.click();
   });
-  section.querySelector('[data-action="apd-import-file"]')?.addEventListener("change", async (event) => {
+
+  container.querySelector('[data-action="apd-import-file"]')?.addEventListener("change", async (event) => {
     const [file] = event.target.files || [];
     if (file) {
       await actions.importActivePlanRevision(plan.id, file);
     }
     event.target.value = "";
   });
-  section.querySelector('[data-action="apd-export"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="apd-export"]')?.addEventListener("click", () => {
     actions.exportActivePlan(plan.id);
   });
-  section.querySelector('[data-action="apd-archive"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="apd-archive"]')?.addEventListener("click", () => {
     confirmAction(document.body, {
       title: "Archive this plan?",
       message:
@@ -420,11 +504,12 @@ export function renderActivePlanDetailView(container, { state, actions }) {
       },
     });
   });
-  section.querySelector('[data-action="apd-remove"]')?.addEventListener("click", () => {
+
+  container.querySelector('[data-action="apd-remove"]')?.addEventListener("click", () => {
     confirmAction(document.body, {
       title: "Remove from active plans?",
       message:
-        "This removes the live plan from your active queue. Completed workout sessions stay in history, but the live plan snapshot itself will be discarded unless you archive it instead.",
+        "This removes the live plan from your active queue. The plan snapshot and all completed sessions will stay available in history as a read-only removed journey.",
       confirmText: "Remove plan",
       cancelText: "Keep active",
       onConfirm: () => {
@@ -434,3 +519,5 @@ export function renderActivePlanDetailView(container, { state, actions }) {
     });
   });
 }
+
+

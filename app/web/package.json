@@ -1,8 +1,12 @@
 {
   "name": "workout-app-web",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@capacitor/android": "^7",
+    "@capacitor/cli": "^7",
+    "@capacitor/core": "^7",
     "playwright": "^1.59.1"
   }
 }

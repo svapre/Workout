@@ -89,6 +89,7 @@ function canonicalExercise(entry) {
     description: entry?.description ?? "",
     type: entry?.type ?? "physical",
     trackingType: entry?.trackingType ?? "reps",
+    executionUnitType: entry?.executionUnitType ?? "",
     supportedTrackingModes: getExerciseSupportedTrackingModes(entry),
     bodyTargets: Array.isArray(entry?.bodyTargets) ? [...entry.bodyTargets] : [],
     equipment: Array.isArray(entry?.equipment) ? [...entry.equipment] : [],
@@ -107,10 +108,46 @@ function canonicalRoutineEntry(entry) {
     order: Number(entry?.order ?? 0),
     sets: Number(entry?.sets ?? 0),
     reps: entry?.reps ?? null,
+    repTargetMode: entry?.repTargetMode ?? null,
     durationSeconds: entry?.durationSeconds ?? null,
     weight: entry?.weight ?? null,
     resistance: entry?.resistance ?? null,
     restSeconds: entry?.restSeconds ?? null,
+    sideMode: entry?.sideMode ?? "",
+    tempoMode: entry?.tempoMode ?? null,
+    tempoSecondsPerRep: entry?.tempoSecondsPerRep ?? null,
+    tempoDownSeconds: entry?.tempoDownSeconds ?? null,
+    tempoBottomHoldSeconds: entry?.tempoBottomHoldSeconds ?? null,
+    tempoUpSeconds: entry?.tempoUpSeconds ?? null,
+    tempoTopHoldSeconds: entry?.tempoTopHoldSeconds ?? null,
+    tempoLabel: entry?.tempoLabel ?? null,
+    transitionAfterSeconds: entry?.transitionAfterSeconds ?? null,
+    transitionLabel: entry?.transitionLabel ?? "",
+    entryBlocks: Array.isArray(entry?.entryBlocks)
+      ? entry.entryBlocks.map((block) => ({
+          id: block?.id ?? "",
+          type: block?.type ?? "work",
+          label: block?.label ?? "",
+          metricType: block?.metricType ?? null,
+          side: block?.side ?? null,
+          repTargetMode: block?.repTargetMode ?? null,
+          reps: block?.reps ?? null,
+          durationSeconds: block?.durationSeconds ?? null,
+          weight: block?.weight ?? null,
+          resistance: block?.resistance ?? null,
+          seconds: block?.seconds ?? null,
+          holdSeconds: block?.holdSeconds ?? null,
+          tempoMode: block?.tempoMode ?? null,
+          tempoSecondsPerRep: block?.tempoSecondsPerRep ?? null,
+          tempoDownSeconds: block?.tempoDownSeconds ?? null,
+          tempoBottomHoldSeconds: block?.tempoBottomHoldSeconds ?? null,
+          tempoUpSeconds: block?.tempoUpSeconds ?? null,
+          tempoTopHoldSeconds: block?.tempoTopHoldSeconds ?? null,
+          tempoLabel: block?.tempoLabel ?? null,
+          effort: block?.effort ?? null,
+          notes: block?.notes ?? "",
+        }))
+      : [],
     notes: entry?.notes ?? "",
   };
 }
@@ -271,7 +308,7 @@ function resolveBodyTargets(importedBodyTargets, localBodyTargets) {
 
     blockingIssues.push(
       createIssue(
-        `Body-target conflict for "${normalized.name || normalized.id}". Review the shared taxonomy before importing this revision.`,
+        `Body-target conflict for "${normalized.name || normalized.id}". Review the shared taxonomy before importing this plan update.`,
         "BODY_TARGET_CONFLICT",
       ),
     );
@@ -730,7 +767,7 @@ function buildStagePreview(localPlan, importedPlan, selectedStageAnchorId, block
       if (!scheduleEntryMatches(localCurrentDayEntry, importedDayEntry)) {
         requiresManualAnchor = true;
         status = "manual";
-        message = "The revised current stage changes today's scheduled step. Choose a new anchor stage to continue safely.";
+        message = "The revised current stage changes today's ordered step. Choose a new anchor stage to continue safely.";
       } else {
         resolvedSelectedAnchorId = localCurrentStage.id;
         anchorIndex = autoIndex;
@@ -916,7 +953,7 @@ function createReviewForBlockingImport(activePlanId, localPlan, rawPackage, issu
     },
     stageMapping: {
       status: "blocked",
-      message: "This revision package cannot be applied.",
+      message: "This plan update package cannot be applied.",
       requiresManualAnchor: false,
       candidateStages: [],
     },
@@ -1031,7 +1068,7 @@ export function prepareActivePlanRevisionReview(activePlanId, input, deps, overr
   if (exportVersion !== SUPPORTED_EXPORT_VERSION) {
     blockingIssues.push(
       createIssue(
-        `Unsupported export version "${exportVersion ?? "unknown"}". Expected ${SUPPORTED_EXPORT_VERSION}.`,
+        `Unsupported active-plan revision package version "${exportVersion ?? "unknown"}". Expected ${SUPPORTED_EXPORT_VERSION}.`,
         "UNSUPPORTED_EXPORT_VERSION",
       ),
     );
@@ -1159,10 +1196,10 @@ export function applyPreparedActivePlanRevision(review, deps) {
     throw new Error(rebuilt.blockingIssues[0]?.message || "Revision import is blocked.");
   }
   if (rebuilt.staleVersion && !rebuilt.staleAcknowledged) {
-    throw new Error("Acknowledge the stale revision warning before applying.");
+    throw new Error("Acknowledge the stale plan-update warning before applying.");
   }
   if (rebuilt.stageMapping.requiresManualAnchor && !rebuilt.selectedStageAnchorId) {
-    throw new Error("Choose a new current-stage anchor before applying this revision.");
+    throw new Error("Choose a new current stage before applying this plan update.");
   }
 
   const timestamp = new Date().toISOString();

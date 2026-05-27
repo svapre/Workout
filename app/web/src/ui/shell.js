@@ -1,10 +1,18 @@
 const NAV_ITEMS = [
   { id: "active-plans", label: "Home", icon: "home", description: "Active plans & current workouts" },
   { id: "workouts", label: "History", icon: "history", description: "Past workout logs" },
-  { id: "plans", label: "Plans", icon: "plans", description: "Training plan blueprints" },
+  { id: "plans", label: "Plans", icon: "plans", description: "Training plan templates" },
   { id: "routines", label: "Routines", icon: "routines", description: "Workout routines" },
-  { id: "exercises", label: "Exercises", icon: "exercises", description: "Exercise catalog" },
+  { id: "exercises", label: "Activities", icon: "exercises", description: "Activity library" },
 ];
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 function renderNavIcon(iconId, className) {
   const path = {
@@ -86,6 +94,16 @@ export function renderShell(root, state, actions) {
         </header>
       `}
 
+      ${state.notice ? `
+        <div class="status-banner" role="status" aria-live="polite">
+          <div class="status-content">
+            <span class="status-icon" aria-hidden="true">✓</span>
+            <span class="status-message">${escapeHtml(state.notice)}</span>
+            <button class="status-close" data-action="clear-notice" type="button" aria-label="Dismiss notice">×</button>
+          </div>
+        </div>
+      ` : ""}
+
       <main class="main-content${isExecutionRoute ? " main-content--immersive" : ""}" data-role="outlet"></main>
 
       ${isExecutionRoute ? "" : `
@@ -125,8 +143,22 @@ export function renderShell(root, state, actions) {
 
 function getNavButtonClass(currentRoute, buttonRoute) {
   let baseRoute = currentRoute.split("/")[0];
-  if (baseRoute === "active-plan" || baseRoute === "active-plan-revision" || baseRoute === "active-plan-edit") {
+  if (
+    baseRoute === "active-plan" ||
+    baseRoute === "active-plan-revision" ||
+    baseRoute === "active-plan-edit" ||
+    baseRoute === "active-plan-study"
+  ) {
     baseRoute = "active-plans";
+  }
+  if (baseRoute === "plan-study") {
+    baseRoute = "plans";
+  }
+  if (baseRoute === "routine") {
+    baseRoute = "routines";
+  }
+  if (baseRoute === "exercise") {
+    baseRoute = "exercises";
   }
   return baseRoute === buttonRoute ? "is-active" : "";
 }
@@ -142,8 +174,16 @@ function handleBackNavigation(currentRoute, actions, state) {
   } else if (currentRoute.startsWith("active-plan-edit/")) {
     const planId = currentRoute.split("/")[1];
     actions.leaveActivePlanEditorToDetail(planId);
+  } else if (currentRoute.startsWith("active-plan-study/")) {
+    actions.returnFromDetailContext(`active-plan/${currentRoute.split("/")[1] || ""}`);
   } else if (currentRoute.startsWith("active-plan/")) {
     actions.navigate("active-plans");
+  } else if (currentRoute.startsWith("plan-study/")) {
+    actions.returnFromDetailContext("plans");
+  } else if (currentRoute.startsWith("routine/")) {
+    actions.returnFromDetailContext("routines");
+  } else if (currentRoute.startsWith("exercise/")) {
+    actions.returnFromDetailContext("exercises");
   } else if (currentRoute.startsWith("workout-player/")) {
     actions.navigate("active-plans");
   } else {

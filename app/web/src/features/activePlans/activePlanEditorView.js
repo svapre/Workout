@@ -7,10 +7,10 @@ import {
 
 function normalizeUiCopy(value) {
   return String(value ?? "")
-    .replace(/Ã‚Â·/g, "/")
-    .replace(/Ã¢â‚¬â„¢/g, "'")
-    .replace(/Ã¢â€ â€™/g, "/")
-    .replace(/Ã°Å¸â€™Âª/g, "PL");
+    .replace(/Ãƒâ€šÃ‚Â·/g, "/")
+    .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢/g, "'")
+    .replace(/ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢/g, "/")
+    .replace(/ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Âª/g, "PL");
 }
 
 function escapeHtml(str) {
@@ -51,7 +51,7 @@ function buildStageEntryOptions(schedule, routines, exercises) {
     const routine = routines.find((item) => item.id === scheduleEntry.routineId);
     (routine?.entries || []).forEach((entry) => {
       const exercise = exercises.find((item) => item.id === entry.exerciseId);
-      const exerciseName = exercise?.name || entry.exerciseId || "Exercise";
+      const exerciseName = exercise?.name || entry.exerciseId || "Activity";
       const entryMetric = inferMetricFromExerciseEntry(entry, exercise);
       const valueLabel = entryMetric === "duration"
         ? `${entry.durationSeconds ?? 0}s`
@@ -121,7 +121,7 @@ function formatMilestoneSummary(stage, exercises = []) {
   if (milestone.test.type === "exercise" && milestone.test.exerciseId) {
     const exerciseName =
       exercises.find((exercise) => exercise.id === milestone.test.exerciseId)?.name ||
-      "Exercise";
+      "Activity";
     const metricLabel = milestone.test.metric === "duration" ? "seconds" : "reps";
     return `${exerciseName} test / ${milestone.test.target ?? 1} ${metricLabel}`;
   }
@@ -138,8 +138,55 @@ function formatMilestoneSummary(stage, exercises = []) {
   }
 
   const target = milestone.eligibility.target ?? 1;
-  const continuityLabel = milestone.eligibility.requiresContinuous ? " consecutive" : "";
-  return `Unlock after ${target}${continuityLabel} cycle${target === 1 ? "" : "s"}`;
+  if (milestone.eligibility.requiresContinuous) {
+    return `Unlock after ${target} consecutive cycle completion${target === 1 ? "" : "s"}`;
+  }
+  return `Unlock after ${target} cycle completion${target === 1 ? "" : "s"}`;
+}
+
+function renderFeedbackPromptEditor(prompts) {
+  const items = Array.isArray(prompts) ? prompts : [];
+
+  return `
+    <div class="field field--full">
+      <label>Session Feedback Prompts</label>
+      <p class="panel__copy" style="margin: 0 0 12px;">Optional check-ins shown after each session in this stage. Use them for symptoms, function changes, or rehab-style notes that matter to later review.</p>
+      <div class="stack stack--tight">
+        ${items.length ? items.map((prompt, index) => `
+          <div style="padding: 14px; border-radius: 18px; border: 1px solid rgba(143,168,210,0.16); background: rgba(255,255,255,0.02);">
+            <div class="field-grid">
+              <div class="field">
+                <label>Prompt</label>
+                <input
+                  type="text"
+                  data-feedback-prompt-field="label"
+                  data-feedback-prompt-index="${index}"
+                  value="${escapeHtml(prompt.label || "")}"
+                  placeholder="e.g. How does numbness feel after this session?"
+                >
+              </div>
+              <div class="field">
+                <label>Placeholder</label>
+                <input
+                  type="text"
+                  data-feedback-prompt-field="placeholder"
+                  data-feedback-prompt-index="${index}"
+                  value="${escapeHtml(prompt.placeholder || "")}"
+                  placeholder="e.g. Less tingling in the hand, same as before, or worse."
+                >
+              </div>
+            </div>
+            <div class="page-actions__group" style="margin-top: 10px;">
+              <button class="button button--ghost button--compact button--danger" type="button" data-action="remove-feedback-prompt" data-feedback-prompt-index="${index}">Remove prompt</button>
+            </div>
+          </div>
+        `).join("") : `
+          <div class="read-block">No session feedback prompts yet.</div>
+        `}
+        <button class="button button--ghost button--compact" data-action="add-feedback-prompt" type="button">Add Feedback Prompt</button>
+      </div>
+    </div>
+  `;
 }
 
 function stageStateLabel(index, currentStageIndex) {
@@ -186,7 +233,7 @@ function renderLivePlanEditor(container, plan, exercises, actions) {
       <div class="library-header">
         <div class="library-header__copy">
           <h1>Live Plan Editor</h1>
-          <p>Refining the active journey for ${escapeHtml(plan.displayName || plan.name || "Untitled Plan")}.</p>
+          <p>Editing active plan: ${escapeHtml(plan.displayName || plan.name || "Untitled Plan")}.</p>
         </div>
       </div>
 
@@ -204,10 +251,6 @@ function renderLivePlanEditor(container, plan, exercises, actions) {
               <label>Live plan title</label>
               <input type="text" data-field="displayName" value="${escapeHtml(plan.displayName || "")}" placeholder="e.g. Shivam / Morning Strength">
             </div>
-            <div class="field">
-              <label>Blueprint reference</label>
-              <div class="read-block">${escapeHtml(plan.name || "Unnamed blueprint")}</div>
-            </div>
             <div class="field field--full">
               <label>Goal</label>
               <input type="text" data-field="goal" value="${escapeHtml(plan.goal || "")}" placeholder="Short goal or outcome">
@@ -216,21 +259,28 @@ function renderLivePlanEditor(container, plan, exercises, actions) {
               <label>Description</label>
               <textarea data-field="description" style="min-height: 100px;">${escapeHtml(plan.description || "")}</textarea>
             </div>
+            <div class="field field--full">
+              <label>Built from</label>
+              <div class="read-block">${escapeHtml(plan.name || "Unnamed template")}</div>
+              <p class="field-hint">Editing this live plan changes only this active copy. The original template stays the same.</p>
+            </div>
             <div class="field">
-              <label>Theme Color</label>
+              <label>Accent color</label>
               <input type="text" data-theme-field="color" value="${escapeHtml(theme.color)}" placeholder="#4FD1C5">
+              <p class="field-hint">Used on this plan card and key actions.</p>
             </div>
             <div class="field">
-              <label>Theme Icon</label>
-              <input type="text" data-theme-field="icon" value="${escapeHtml(theme.icon)}" maxlength="8" placeholder="PL">
+              <label>Badge text</label>
+              <input type="text" data-theme-field="icon" value="${escapeHtml(theme.icon)}" maxlength="8" placeholder="SF">
+              <p class="field-hint">Short letters shown on the plan badge.</p>
             </div>
-            <div class="field">
-              <label>Theme Code</label>
-              <input type="text" data-theme-field="code" value="${escapeHtml(theme.code)}" maxlength="8" placeholder="PLN">
-            </div>
-            <div class="field">
-              <label>Runtime status</label>
-              <div class="read-block">Stage ${currentStageIndex + 1} / Day ${Math.max(1, Number(plan.currentDayInCycle ?? 1))} / Cycle ${Math.max(0, Number(plan.currentCycleCount ?? 0))}</div>
+            <div class="field field--full">
+              <label>Current progress</label>
+              <div class="readonly-status-card">
+                <span class="readonly-status-card__eyebrow">Read-only</span>
+                <strong class="readonly-status-card__value">Stage ${currentStageIndex + 1} / Day ${Math.max(1, Number(plan.currentDayInCycle ?? 1))} / Cycle ${Math.max(0, Number(plan.currentCycleCount ?? 0))}</strong>
+                <p class="readonly-status-card__copy">This reflects the live plan's current progress. Change the stage map below if you want to alter what comes next.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -255,15 +305,18 @@ function renderLivePlanEditor(container, plan, exercises, actions) {
               return `
                 <li class="stage-list__item">
                   <div class="stage-list__row">
-                    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                      <span style="font-weight: 800; color: var(--brand); opacity: 0.5;">${index + 1}</span>
-                      <span style="font-weight: 600;">${escapeHtml(stage.name || "Untitled Stage")}</span>
-                      <span class="badge" style="background: ${stageState.tone}; font-size: 0.75rem;">${escapeHtml(stageState.label)}</span>
-                      <span class="badge" style="background: rgba(143,168,210,0.05); font-size: 0.75rem;">${stage.schedule?.length || 0}-step cycle</span>
+                    <div class="stage-list__identity">
+                      <div class="timeline-item__badges">
+                        <span class="stage-list__index">${index + 1}</span>
+                        <span class="stage-list__name">${escapeHtml(stage.name || "Untitled Stage")}</span>
+                        <span class="badge" style="background: ${stageState.tone}; font-size: 0.75rem;">${escapeHtml(stageState.label)}</span>
+                        <span class="badge" style="background: rgba(143,168,210,0.05); font-size: 0.75rem;">${stage.schedule?.length || 0} ordered step${(stage.schedule?.length || 0) === 1 ? "" : "s"}</span>
+                      </div>
+                      ${stage.guidance ? `<p class="stage-list__summary">${escapeHtml(stage.guidance)}</p>` : ""}
                     </div>
                     <div class="page-actions__group">
                       ${isFrozen ? `
-                        <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--muted);">History locked</span>
+                        <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--muted);">Read-only after use</span>
                       ` : `
                         <button class="button button--ghost" style="padding: 8px 14px; min-height: 40px;" data-action="edit-live-stage" data-stage-id="${stage.id}" type="button">Edit</button>
                         <button class="button button--ghost button--danger" style="padding: 8px 14px; min-height: 40px;" data-action="remove-live-stage" data-stage-id="${stage.id}" type="button">Delete</button>
@@ -309,14 +362,15 @@ function renderLivePlanEditor(container, plan, exercises, actions) {
   });
   container.querySelector('[data-action="add-live-stage"]')?.addEventListener("click", () => {
     const newId = createLocalId("stage");
-    const newStage = {
-      id: newId,
-      name: "New Stage",
-      predecessorStageId: null,
-      transitionRule: "prompt_user",
-      schedule: [{ type: "rest", routineId: null }],
-      milestone: createDefaultMilestone(),
-    };
+      const newStage = {
+        id: newId,
+        name: "New Stage",
+        guidance: "",
+        predecessorStageId: null,
+        transitionRule: "prompt_user",
+        schedule: [{ type: "rest", routineId: null }],
+        milestone: createDefaultMilestone(),
+      };
     actions.updateActivePlanDraft({ stages: [...stages, newStage] });
     actions.setEditingActivePlanStageId(newId);
   });
@@ -394,6 +448,10 @@ function renderLiveStageEditor(container, stageDraft, routines, allExercises, al
                 <option value="manual" ${stage.transitionRule === "manual" ? "selected" : ""}>Manual Advance Later</option>
               </select>
             </div>
+            <div class="field field--full">
+              <label>Stage Guidance</label>
+              <textarea data-stage-field="guidance" style="min-height: 110px;" placeholder="Describe what the user should understand about this stage, its focus, and any preparation notes.">${escapeHtml(stage.guidance || "")}</textarea>
+            </div>
 
             <div class="field field--full" style="margin-top: 8px;">
               <label style="margin-bottom: 12px; display: block; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);">Schedule</label>
@@ -446,7 +504,7 @@ function renderLiveStageEditor(container, stageDraft, routines, allExercises, al
                   <label>Milestone Test</label>
                   <select data-milestone-test-field="type">
                     <option value="none" ${milestone.test.type !== "exercise" ? "selected" : ""}>No separate test</option>
-                    <option value="exercise" ${milestone.test.type === "exercise" ? "selected" : ""}>Exercise Test</option>
+                    <option value="exercise" ${milestone.test.type === "exercise" ? "selected" : ""}>Activity test</option>
                   </select>
                 </div>
 
@@ -454,24 +512,24 @@ function renderLiveStageEditor(container, stageDraft, routines, allExercises, al
                   <div class="field">
                     <label>Test Source</label>
                     <select data-milestone-test-field="source">
-                      <option value="stage_entry" ${milestone.test.source === "stage_entry" ? "selected" : ""}>Use Stage Routine Exercise</option>
-                      <option value="custom" ${milestone.test.source !== "stage_entry" ? "selected" : ""}>Standalone Exercise Test</option>
+                      <option value="stage_entry" ${milestone.test.source === "stage_entry" ? "selected" : ""}>Use stage routine activity</option>
+                      <option value="custom" ${milestone.test.source !== "stage_entry" ? "selected" : ""}>Standalone activity test</option>
                     </select>
                   </div>
 
                   ${milestone.test.source === "stage_entry" ? `
                     <div class="field field--full">
-                      <label>Routine Exercise Instance</label>
+                      <label>Routine activity entry</label>
                       <select data-milestone-test-field="stageEntry">
-                        <option value="">-- Select stage exercise --</option>
+                        <option value="">-- Select stage activity --</option>
                         ${stageEntryOptions.map((option) => `<option value="${option.id}" ${matchingStageEntry?.id === option.id ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
                       </select>
                     </div>
                   ` : `
                     <div class="field field--full">
-                      <label>Test Exercise</label>
+                      <label>Test activity</label>
                       <select data-milestone-test-field="exerciseId">
-                        <option value="">-- Select exercise --</option>
+                        <option value="">-- Select activity --</option>
                         ${allExercises.map((exercise) => `<option value="${exercise.id}" ${milestone.test.exerciseId === exercise.id ? "selected" : ""}>${escapeHtml(exercise.name)}</option>`).join("")}
                       </select>
                     </div>
@@ -522,6 +580,7 @@ function renderLiveStageEditor(container, stageDraft, routines, allExercises, al
                     </select>
                   </div>
                 ` : ""}
+                ${renderFeedbackPromptEditor(milestone.feedbackPrompts)}
               </div>
             </div>
           </div>
@@ -685,6 +744,56 @@ function renderLiveStageEditor(container, stageDraft, routines, allExercises, al
         milestone: createDefaultMilestone({
           ...milestone,
           onFailure: nextFailure,
+        }),
+      });
+    });
+  });
+
+  container.querySelector('[data-action="add-feedback-prompt"]')?.addEventListener("click", () => {
+    actions.updateActivePlanStageDraft({
+      milestone: createDefaultMilestone({
+        ...milestone,
+        feedbackPrompts: [
+          ...(milestone.feedbackPrompts || []),
+          {
+            id: createLocalId("feedback"),
+            label: "",
+            placeholder: "",
+          },
+        ],
+      }),
+    });
+  });
+
+  container.querySelectorAll("[data-feedback-prompt-field]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const promptIndex = Number.parseInt(input.dataset.feedbackPromptIndex, 10);
+      const field = input.dataset.feedbackPromptField;
+      const nextPrompts = (milestone.feedbackPrompts || []).map((prompt, index) =>
+        index === promptIndex
+          ? {
+              ...prompt,
+              [field]: input.value,
+            }
+          : prompt,
+      );
+
+      actions.updateActivePlanStageDraft({
+        milestone: createDefaultMilestone({
+          ...milestone,
+          feedbackPrompts: nextPrompts,
+        }),
+      });
+    });
+  });
+
+  container.querySelectorAll('[data-action="remove-feedback-prompt"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const promptIndex = Number.parseInt(button.dataset.feedbackPromptIndex, 10);
+      actions.updateActivePlanStageDraft({
+        milestone: createDefaultMilestone({
+          ...milestone,
+          feedbackPrompts: (milestone.feedbackPrompts || []).filter((_, index) => index !== promptIndex),
         }),
       });
     });

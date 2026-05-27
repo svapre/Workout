@@ -1,5 +1,5 @@
 import { createId } from "../../core/uid.js";
-import { mapTrackingType } from "../schemaMigration.js";
+import { mapTrackingType, normalizeRoutineEntryBlocks } from "../schemaMigration.js";
 import { parseCsv, toCsv } from "./csv.js";
 
 const ROUTINE_COLUMNS = [
@@ -14,6 +14,10 @@ const ROUTINE_COLUMNS = [
   "weight_kg",
   "resistance",
   "rest_seconds",
+  "side_mode",
+  "transition_after_seconds",
+  "transition_label",
+  "entry_blocks_json",
   "notes",
 ];
 
@@ -74,6 +78,13 @@ export function exportRoutinesToCsv(routines) {
       weight_kg: exercise.weight ?? exercise.targetWeightKg ?? "",
       resistance: exercise.resistance ?? "",
       rest_seconds: exercise.restSeconds ?? exercise.restSec ?? "",
+      side_mode: exercise.sideMode ?? "",
+      transition_after_seconds: exercise.transitionAfterSeconds ?? exercise.transitionSec ?? "",
+      transition_label: exercise.transitionLabel ?? exercise.transitionCue ?? "",
+      entry_blocks_json:
+        Array.isArray(exercise.entryBlocks) && exercise.entryBlocks.length
+          ? JSON.stringify(exercise.entryBlocks)
+          : "",
       notes: exercise.notes ?? "",
     }));
   });
@@ -115,6 +126,12 @@ export function importRoutinesFromCsv(csvText, existingNames) {
         const durationSeconds = toNumberOrNull(row.duration_seconds ?? row.target_duration_sec);
         const weight = toNumberOrNull(row.weight_kg ?? row.target_weight_kg);
         const resistance = row.resistance?.trim() || null;
+        let entryBlocks = [];
+        try {
+          entryBlocks = row.entry_blocks_json ? JSON.parse(row.entry_blocks_json) : [];
+        } catch {
+          entryBlocks = [];
+        }
         return {
           id: createId("exercise"),
           order: index + 1,
@@ -126,6 +143,12 @@ export function importRoutinesFromCsv(csvText, existingNames) {
           weight: trackingType === "weight" ? weight : null,
           resistance: trackingType === "resistance" ? resistance : null,
           restSeconds: toNumberOrNull(row.rest_seconds ?? row.rest_sec),
+          sideMode: row.side_mode?.trim() || "",
+          transitionAfterSeconds: toNumberOrNull(
+            row.transition_after_seconds ?? row.transition_sec,
+          ),
+          transitionLabel: row.transition_label?.trim() || row.transition_cue?.trim() || "",
+          entryBlocks: normalizeRoutineEntryBlocks(Array.isArray(entryBlocks) ? entryBlocks : []),
           notes: row.notes?.trim() || "",
         };
       });

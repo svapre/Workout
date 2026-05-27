@@ -3,16 +3,23 @@ import { createStore } from "./core/store.js";
 import { createSeedExerciseCatalog } from "./data/defaultExerciseCatalog.js";
 import { createSeedRoutines, createSeedPlans } from "./data/defaults.js";
 import { createSeedWorkoutHistory } from "./data/defaultWorkoutHistory.js";
+import { createStarterContentBundle, STARTER_CONTENT_VERSION } from "./data/starterContent.js";
 import { parseExerciseImportJson, parseTrainingPlanImport } from "./data/import/trainingPlanImport.js";
 import { createBodyMapRepository, createSeedBodyMap } from "./data/repositories/bodyMapRepository.js";
 import { createExerciseRepository } from "./data/repositories/exerciseRepository.js";
 import { createRoutineRepository } from "./data/repositories/routineRepository.js";
 import { createWorkoutRepository } from "./data/repositories/workoutRepository.js";
 import { createPlanRepository } from "./data/repositories/planRepository.js";
+import {
+  createHistoricalPlanSnapshot,
+  loadHistoricalPlanSnapshots,
+  upsertHistoricalPlanSnapshot,
+} from "./data/historySnapshot.js";
 import { createLocalStore } from "./data/storage/localStore.js";
 import { renderExerciseView } from "./features/exercises/exerciseView.js";
 import { createExerciseService } from "./features/exercises/exerciseService.js";
 import { renderRoutineView } from "./features/routines/routineView.js";
+import { renderRoutineDetailView } from "./features/routines/routineDetailView.js";
 import { createRoutineService } from "./features/routines/routineService.js";
 import { createWorkoutService } from "./features/workouts/workoutService.js";
 import { createPlanService } from "./features/plans/planService.js";
@@ -22,9 +29,11 @@ import {
   createDefaultMilestone,
   getExerciseDefaultTrackingType,
   inferRoutineEntryTrackingType,
+  normalizeRoutineEntryBlocks,
 } from "./data/schemaMigration.js";
 import { renderWorkoutView } from "./features/workouts/workoutView.js";
 import { renderPlansView } from "./features/plans/plansView.js?v=10";
+import { renderBlueprintStudyView, renderActivePlanStudyView } from "./features/plans/studyView.js";
 import { renderActivePlansView } from "./features/activePlans/activePlansView.js";
 import { createActivePlanService } from "./features/activePlans/activePlanService.js";
 import { getNextRoutine } from "./features/activePlans/activePlanUtils.js";
@@ -50,6 +59,106 @@ function normalizeSelectedId(items, selectedId) {
   return exists ? selectedId : null;
 }
 
+function toHistoryDateIso(value) {
+  if (!value) {
+    return "";
+  }
+
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function getWorkoutHistoryDate(workout) {
+  return toHistoryDateIso(workout?.workoutDate || workout?.completedAt || workout?.startedAt);
+}
+
+function resolveHistorySelection(workouts, planId, selectedWorkoutId = null, selectedHistoryDate = null) {
+  const normalizedPlanId = planId || null;
+  const visibleWorkouts = workouts.filter(
+    (workout) => !normalizedPlanId || workout.activePlanId === normalizedPlanId,
+  );
+  const currentSelectedWorkout = visibleWorkouts.find((workout) => workout.id === selectedWorkoutId) || null;
+  const preferredDate = currentSelectedWorkout
+    ? getWorkoutHistoryDate(currentSelectedWorkout)
+    : toHistoryDateIso(selectedHistoryDate);
+  const matchingDateWorkout = preferredDate
+    ? visibleWorkouts.find((workout) => getWorkoutHistoryDate(workout) === preferredDate) || null
+    : null;
+  const fallbackWorkout = matchingDateWorkout || visibleWorkouts[0] || null;
+
+  return {
+    selectedHistoryPlanId: normalizedPlanId,
+    selectedWorkoutId: currentSelectedWorkout?.id ?? fallbackWorkout?.id ?? null,
+    selectedHistoryDate:
+      currentSelectedWorkout
+      ? getWorkoutHistoryDate(currentSelectedWorkout)
+      : matchingDateWorkout
+        ? preferredDate
+        : getWorkoutHistoryDate(fallbackWorkout) || toHistoryDateIso(new Date()),
+  };
+}
+
+function mergeMissingById(currentItems, starterItems) {
+  const existingIds = new Set((currentItems || []).map((item) => item.id));
+  const added = (starterItems || []).filter((item) => item?.id && !existingIds.has(item.id));
+  return {
+    merged: [...(currentItems || []), ...added],
+    added,
+  };
+}
+
+function formatStarterSyncNotice(result) {
+  if (!result || result.totalAdded === 0) {
+    return "";
+  }
+
+  const parts = [];
+  if (result.exerciseMerge.added.length) {
+    parts.push(
+      `${result.exerciseMerge.added.length} exercise${result.exerciseMerge.added.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (result.routineMerge.added.length) {
+    parts.push(
+      `${result.routineMerge.added.length} routine${result.routineMerge.added.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (result.planMerge.added.length) {
+    parts.push(
+      `${result.planMerge.added.length} template${result.planMerge.added.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (result.bodyTargetMerge.added.length) {
+    parts.push(
+      `${result.bodyTargetMerge.added.length} body target${result.bodyTargetMerge.added.length === 1 ? "" : "s"}`,
+    );
+  }
+
+  return `Starter library updated: ${parts.join(", ")}.`;
+}
+
+function triggerBlobDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  // Revoke after the browser has a chance to start the download.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function createApp(root) {
   const localStore = createLocalStore("workout-app.state.v1");
   const exerciseStore = createLocalStore("workout-app.exercises.v1");
@@ -69,6 +178,8 @@ export function createApp(root) {
   const planRepository = createPlanRepository(planStore, createSeedPlans, "plan_blueprints");
   const activePlanStore = createLocalStore("workout-app.activePlans.v1");
   const activePlanRepository = createPlanRepository(activePlanStore, () => [], "active_plans");
+  const archivedPlanStore = createLocalStore("workout-app.archivedPlans.v1");
+  const appMetaStore = createLocalStore("workout-app.meta.v1");
   const planService = createPlanService(planRepository, activePlanRepository, {
     workoutRepository,
     exerciseRepository,
@@ -76,14 +187,94 @@ export function createApp(root) {
     bodyMapRepository,
   });
   const activePlanService = createActivePlanService(activePlanRepository);
-  const router = createRouter(["routines", "exercises", "workouts", "plans", "active-plans", "active-plan", "active-plan-edit", "active-plan-revision", "workout-player"], "active-plans");
+  const router = createRouter(
+    [
+      "routines",
+      "routine",
+      "exercises",
+      "exercise",
+      "body-targets",
+      "body-target",
+      "workouts",
+      "plans",
+      "plan-study",
+      "active-plans",
+      "active-plan",
+      "active-plan-study",
+      "active-plan-edit",
+      "active-plan-revision",
+      "workout-player",
+    ],
+    "active-plans",
+  );
 
+  function syncStarterContentIfNeeded({ force = false } = {}) {
+    const meta = appMetaStore.load() || {};
+    const shouldSync = force || meta.starterContentVersion !== STARTER_CONTENT_VERSION;
+    if (!shouldSync) {
+      return {
+        totalAdded: 0,
+        bodyTargetMerge: { added: [] },
+        exerciseMerge: { added: [] },
+        routineMerge: { added: [] },
+        planMerge: { added: [] },
+      };
+    }
+
+    const starterBundle = createStarterContentBundle();
+    const currentBodyTargets = bodyMapRepository.getAll();
+    const currentExercises = exerciseRepository.list();
+    const currentRoutines = routineRepository.list();
+    const currentPlans = planService.getAllBlueprints();
+
+    const bodyTargetMerge = mergeMissingById(currentBodyTargets, starterBundle.bodyTargets);
+    const exerciseMerge = mergeMissingById(currentExercises, starterBundle.exercises);
+    const routineMerge = mergeMissingById(currentRoutines, starterBundle.routines);
+    const planMerge = mergeMissingById(currentPlans, starterBundle.plans);
+
+    if (bodyTargetMerge.added.length) {
+      bodyMapRepository.replaceAll(bodyTargetMerge.merged);
+    }
+    if (exerciseMerge.added.length) {
+      exerciseRepository.replaceAll(exerciseMerge.merged);
+    }
+    if (routineMerge.added.length) {
+      routineRepository.replaceAll(routineMerge.merged);
+    }
+    if (planMerge.added.length) {
+      planRepository.replaceAll(planMerge.merged);
+    }
+
+    appMetaStore.save({
+      ...meta,
+      starterContentVersion: STARTER_CONTENT_VERSION,
+      starterContentSyncedAt: new Date().toISOString(),
+    });
+
+    return {
+      totalAdded:
+        bodyTargetMerge.added.length +
+        exerciseMerge.added.length +
+        routineMerge.added.length +
+        planMerge.added.length,
+      bodyTargetMerge,
+      exerciseMerge,
+      routineMerge,
+      planMerge,
+    };
+  }
+
+  const starterSyncResult = syncStarterContentIfNeeded();
+
+  const initialBodyTargets = bodyMapRepository.getAll();
   const initialExercises = exerciseService.getAll();
   const initialRoutines = routineService.getAll();
   const initialWorkouts = workoutService.getAll();
+  const initialArchivedPlans = loadHistoricalPlanSnapshots(archivedPlanStore);
   const store = createStore({
     route: router.getCurrentRoute(),
-    notice: "",
+    notice: formatStarterSyncNotice(starterSyncResult),
+    bodyTargets: initialBodyTargets,
     exercises: initialExercises,
     selectedExerciseId: null,
     routines: initialRoutines,
@@ -91,9 +282,10 @@ export function createApp(root) {
     workouts: initialWorkouts,
     selectedWorkoutId: initialWorkouts[0]?.id ?? null,
     selectedHistoryPlanId: null,
+    selectedHistoryDate: getWorkoutHistoryDate(initialWorkouts[0]) || toHistoryDateIso(new Date()),
     plans: planService.getAllBlueprints(),
     activePlans: activePlanService.getAll(),
-    archivedPlans: createLocalStore("workout-app.archivedPlans.v1").load() || [],
+    archivedPlans: initialArchivedPlans,
     selectedPlanId: null,
     selectedActivePlanId: null,
     pendingActivePlanRevision: null,
@@ -107,6 +299,7 @@ export function createApp(root) {
     stageDraft: null,
     draftRoutine: null,
     expandedExerciseIds: new Set(),
+    detailNavigation: null,
   });
 
   function getPrimaryNavResetPatch() {
@@ -121,12 +314,14 @@ export function createApp(root) {
       selectedExerciseId: null,
         selectedWorkoutId: null,
         selectedHistoryPlanId: null,
+        selectedHistoryDate: null,
         selectedActivePlanId: null,
         pendingActivePlanRevision: null,
         activePlanEditMode: false,
         editingActivePlanStageId: null,
         draftActivePlan: null,
         activePlanStageDraft: null,
+        detailNavigation: null,
       };
   }
 
@@ -188,6 +383,157 @@ export function createApp(root) {
     return route.startsWith("active-plan-revision/") && state.pendingActivePlanRevision?.reviewMode === "editor";
   }
 
+  function hasUnsavedEditableState(state = store.getState()) {
+    return (
+      isBlueprintDirty(state) ||
+      isRoutineDraftDirty(state) ||
+      isActivePlanDraftDirty(state) ||
+      hasWorkoutPlayerUnsavedProgress()
+    );
+  }
+
+  function getRoutineEditorReturnRoute(state = store.getState()) {
+    const returnRoute = state.detailNavigation?.returnRoute || "";
+    return returnRoute.startsWith("routine/") ? returnRoute : "";
+  }
+
+  function planUsesRoutine(plan, routineId) {
+    const stages = Array.isArray(plan?.stages) ? plan.stages : [];
+    return stages.some((stage) => {
+      const scheduleUsesRoutine = Array.isArray(stage?.schedule)
+        && stage.schedule.some((entry) => entry?.type === "routine" && entry.routineId === routineId);
+      const milestoneUsesRoutine = stage?.milestone?.test?.routineId === routineId;
+      return scheduleUsesRoutine || milestoneUsesRoutine;
+    });
+  }
+
+  function routineUsesCatalogExercise(routine, exerciseId) {
+    const entries = Array.isArray(routine?.entries)
+      ? routine.entries
+      : Array.isArray(routine?.exercises)
+        ? routine.exercises
+        : [];
+    return entries.some((entry) => entry?.exerciseId === exerciseId);
+  }
+
+  function planUsesCatalogExercise(plan, exerciseId, routines = store.getState().routines) {
+    const stages = Array.isArray(plan?.stages) ? plan.stages : [];
+    const routinesById = new Map((routines || []).map((routine) => [routine.id, routine]));
+    return stages.some((stage) => {
+      const scheduleUsesExercise = Array.isArray(stage?.schedule)
+        && stage.schedule.some((entry) => {
+          if (entry?.type !== "routine" || !entry?.routineId) {
+            return false;
+          }
+          return routineUsesCatalogExercise(routinesById.get(entry.routineId), exerciseId);
+        });
+      const milestoneUsesExercise = stage?.milestone?.test?.exerciseId === exerciseId;
+      return scheduleUsesExercise || milestoneUsesExercise;
+    });
+  }
+
+  function workoutUsesCatalogExercise(workout, exerciseId) {
+    const setUsesExercise = Array.isArray(workout?.sets)
+      && workout.sets.some((set) => set?.exerciseId === exerciseId);
+    const milestoneUsesExercise = workout?.milestoneTest?.exerciseId === exerciseId;
+    return setUsesExercise || milestoneUsesExercise;
+  }
+
+  function exerciseUsesBodyTarget(exercise, targetId) {
+    const primaryTargets = Array.isArray(exercise?.bodyTargets) ? exercise.bodyTargets : [];
+    const secondaryTargets = Array.isArray(exercise?.secondaryMuscles) ? exercise.secondaryMuscles : [];
+    return primaryTargets.includes(targetId) || secondaryTargets.includes(targetId);
+  }
+
+  function describeRoutineDependencies(routineId, state = store.getState()) {
+    const blueprints = (state.plans || []).filter((plan) => planUsesRoutine(plan, routineId));
+    const activePlans = (state.activePlans || []).filter((plan) => planUsesRoutine(plan, routineId));
+    return { blueprints, activePlans };
+  }
+
+  function describeExerciseDependencies(exerciseId, state = store.getState()) {
+    const routines = (state.routines || []).filter((routine) => routineUsesCatalogExercise(routine, exerciseId));
+    const blueprints = (state.plans || []).filter((plan) => planUsesCatalogExercise(plan, exerciseId, state.routines));
+    const activePlans = (state.activePlans || []).filter((plan) => planUsesCatalogExercise(plan, exerciseId, state.routines));
+    const workouts = (state.workouts || []).filter((workout) => workoutUsesCatalogExercise(workout, exerciseId));
+    return { routines, blueprints, activePlans, workouts };
+  }
+
+  function describeBodyTargetDependencies(targetId, state = store.getState()) {
+    const exercises = (state.exercises || []).filter((exercise) => exerciseUsesBodyTarget(exercise, targetId));
+    return { exercises };
+  }
+
+  function formatRoutineDependencyNotice(routineName, dependencySummary) {
+    const parts = [];
+    if (dependencySummary.activePlans.length) {
+      parts.push(`${dependencySummary.activePlans.length} active plan${dependencySummary.activePlans.length === 1 ? "" : "s"}`);
+    }
+    if (dependencySummary.blueprints.length) {
+      parts.push(`${dependencySummary.blueprints.length} template${dependencySummary.blueprints.length === 1 ? "" : "s"}`);
+    }
+
+    const names = [
+      ...dependencySummary.activePlans.map((plan) => plan.displayName || plan.name),
+      ...dependencySummary.blueprints.map((plan) => plan.name),
+    ].filter(Boolean);
+
+    const previewNames = names.slice(0, 3);
+    const extraCount = Math.max(0, names.length - previewNames.length);
+    const previewText = previewNames.length
+      ? ` In use by ${previewNames.join(", ")}${extraCount > 0 ? ` +${extraCount} more` : ""}.`
+      : "";
+
+    return `Can't delete "${routineName}" because it is still used by ${parts.join(" and ")}. Replace or remove those references first.${previewText}`;
+  }
+
+  function formatExerciseDependencyNotice(exerciseName, dependencySummary) {
+    const parts = [];
+    if (dependencySummary.routines.length) {
+      parts.push(`${dependencySummary.routines.length} routine${dependencySummary.routines.length === 1 ? "" : "s"}`);
+    }
+    if (dependencySummary.activePlans.length) {
+      parts.push(`${dependencySummary.activePlans.length} active plan${dependencySummary.activePlans.length === 1 ? "" : "s"}`);
+    }
+    if (dependencySummary.blueprints.length) {
+      parts.push(`${dependencySummary.blueprints.length} template${dependencySummary.blueprints.length === 1 ? "" : "s"}`);
+    }
+    if (dependencySummary.workouts.length) {
+      parts.push(`${dependencySummary.workouts.length} logged session${dependencySummary.workouts.length === 1 ? "" : "s"}`);
+    }
+
+    const names = [
+      ...dependencySummary.routines.map((routine) => routine.name),
+      ...dependencySummary.activePlans.map((plan) => plan.displayName || plan.name),
+      ...dependencySummary.blueprints.map((plan) => plan.name),
+    ].filter(Boolean);
+    const previewNames = names.slice(0, 4);
+    const extraCount = Math.max(0, names.length - previewNames.length);
+    const previewText = previewNames.length
+      ? ` In use by ${previewNames.join(", ")}${extraCount > 0 ? ` +${extraCount} more` : ""}.`
+      : "";
+
+    return `Can't delete "${exerciseName}" because it is still used by ${parts.join(" and ")}. Replace or remove those references first.${previewText}`;
+  }
+
+  function formatBodyTargetDependencyNotice(targetName, dependencySummary) {
+    const names = dependencySummary.exercises.map((exercise) => exercise.name).filter(Boolean);
+    const previewNames = names.slice(0, 4);
+    const extraCount = Math.max(0, names.length - previewNames.length);
+    const previewText = previewNames.length
+      ? ` In use by ${previewNames.join(", ")}${extraCount > 0 ? ` +${extraCount} more` : ""}.`
+      : "";
+    return `Can't delete "${targetName}" because it is still used by ${dependencySummary.exercises.length} activit${dependencySummary.exercises.length === 1 ? "y" : "ies"}. Remove or retarget those activities first.${previewText}`;
+  }
+
+  function createDetailNavigation(returnRoute, returnState = null) {
+    return {
+      returnRoute,
+      returnState,
+      parent: returnRoute.includes("/") ? store.getState().detailNavigation : null,
+    };
+  }
+
   const actions = {
     clearNotice() {
       store.setState({ notice: "" });
@@ -210,25 +556,124 @@ export function createApp(root) {
     selectExercise(exerciseId) {
       store.setState({ selectedExerciseId: exerciseId });
     },
+    openRoutineDetail(routineId, returnRoute = store.getState().route) {
+      if (!routineId) {
+        return;
+      }
+      store.setState({
+        detailNavigation: createDetailNavigation(returnRoute),
+        selectedRoutineId: null,
+        draftRoutine: null,
+      });
+      router.navigate(`routine/${routineId}`);
+    },
+    openExerciseDetail(exerciseId, returnRoute = store.getState().route) {
+      if (!exerciseId) {
+        return;
+      }
+      store.setState({
+        detailNavigation: createDetailNavigation(returnRoute),
+        selectedExerciseId: exerciseId,
+      });
+      router.navigate(`exercise/${exerciseId}`);
+    },
+    openBodyTargetDetail(targetId, returnRoute = store.getState().route) {
+      if (!targetId) {
+        return;
+      }
+      store.setState({ detailNavigation: createDetailNavigation(returnRoute) });
+      router.navigate(`body-target/${targetId}`);
+    },
+    openBlueprintStudy(planId, stageId = "", returnRoute = store.getState().route) {
+      if (!planId) {
+        return;
+      }
+      store.setState({
+        detailNavigation: createDetailNavigation(
+          returnRoute,
+          returnRoute === "plans" ? { selectedPlanId: planId } : null,
+        ),
+      });
+      router.navigate(stageId ? `plan-study/${planId}/${stageId}` : `plan-study/${planId}`);
+    },
+    openActivePlanStudy(planId, stageId = "", returnRoute = store.getState().route) {
+      if (!planId) {
+        return;
+      }
+      store.setState({ detailNavigation: createDetailNavigation(returnRoute) });
+      router.navigate(stageId ? `active-plan-study/${planId}/${stageId}` : `active-plan-study/${planId}`);
+    },
+    editRoutineFromDetail(routineId) {
+      const routine = store.getState().routines.find((entry) => entry.id === routineId);
+      if (!routine) {
+        return;
+      }
+      store.setState({
+        selectedRoutineId: routineId,
+        draftRoutine: JSON.parse(JSON.stringify(routine)),
+        detailNavigation: createDetailNavigation(`routine/${routineId}`),
+      });
+      router.navigate("routines");
+    },
+    returnFromDetailContext(fallbackRoute = "active-plans") {
+      const context = store.getState().detailNavigation;
+      const returnRoute = context?.returnRoute || fallbackRoute;
+      const returnState = context?.returnState || null;
+      const parent = context?.parent || null;
+
+      if (returnState && !returnRoute.includes("/")) {
+        store.setState({
+          ...getPrimaryNavResetPatch(),
+          ...returnState,
+          detailNavigation: parent,
+        });
+        router.navigate(returnRoute);
+        return;
+      }
+
+      store.setState({ detailNavigation: parent });
+      actions.navigate(returnRoute);
+    },
     selectWorkout(workoutId) {
-      store.setState({ selectedWorkoutId: workoutId });
+      const workout = store.getState().workouts.find((entry) => entry.id === workoutId) || null;
+      store.setState({
+        selectedWorkoutId: workoutId,
+        selectedHistoryDate: getWorkoutHistoryDate(workout) || store.getState().selectedHistoryDate,
+      });
+    },
+    selectHistoryDate(dateIso) {
+      const state = store.getState();
+      const normalizedDate = toHistoryDateIso(dateIso) || state.selectedHistoryDate || toHistoryDateIso(new Date());
+      const visibleWorkouts = state.workouts.filter(
+        (workout) => !state.selectedHistoryPlanId || workout.activePlanId === state.selectedHistoryPlanId,
+      );
+      const matchingWorkout = visibleWorkouts.find((workout) => getWorkoutHistoryDate(workout) === normalizedDate) || null;
+      store.setState({
+        selectedHistoryDate: normalizedDate,
+        selectedWorkoutId: matchingWorkout?.id ?? state.selectedWorkoutId,
+      });
     },
     selectHistoryPlan(planId) {
-      const normalizedPlanId = planId || null;
-      const workouts = store.getState().workouts;
-      const currentSelectedWorkout = workouts.find(
-        (workout) =>
-          workout.id === store.getState().selectedWorkoutId &&
-          (!normalizedPlanId || workout.activePlanId === normalizedPlanId),
+      const selection = resolveHistorySelection(
+        store.getState().workouts,
+        planId,
+        store.getState().selectedWorkoutId,
+        store.getState().selectedHistoryDate,
       );
-      const fallbackWorkout = workouts.find(
-        (workout) => !normalizedPlanId || workout.activePlanId === normalizedPlanId,
-      );
-
-      store.setState({
-        selectedHistoryPlanId: normalizedPlanId,
-        selectedWorkoutId: currentSelectedWorkout?.id ?? fallbackWorkout?.id ?? null,
-      });
+      store.setState(selection);
+    },
+    viewHistoryForPlan(planId) {
+      const nextState = {
+        ...getPrimaryNavResetPatch(),
+        ...resolveHistorySelection(
+          store.getState().workouts,
+          planId,
+          store.getState().selectedWorkoutId,
+          store.getState().selectedHistoryDate,
+        ),
+      };
+      store.setState(nextState);
+      router.navigate("workouts");
     },
     selectPlan(planId) {
       if (planId == null || planId === "") {
@@ -258,7 +703,7 @@ export function createApp(root) {
       }
       confirmUnsavedChanges(document.body, {
         message:
-          "Leaving will close this blueprint. Save your edits to the library, discard them, or stay on this screen.",
+          "Leaving will close this template. Save your edits to the library, discard them, or stay on this screen.",
         onSave: () => {
           actions.saveBlueprint();
           actions.selectPlan(null);
@@ -268,15 +713,25 @@ export function createApp(root) {
     },
     leaveRoutineEditor() {
       const state = store.getState();
+      const returnRoute = getRoutineEditorReturnRoute(state);
+      const parentContext = state.detailNavigation?.parent || null;
+      const exitRoutineEditor = () => {
+        store.setState({ selectedRoutineId: null, draftRoutine: null });
+        if (returnRoute) {
+          store.setState({ detailNavigation: parentContext });
+          actions.navigate(returnRoute);
+          return;
+        }
+      };
       if (!isRoutineDraftDirty(state)) {
-        actions.selectRoutine(null);
+        exitRoutineEditor();
         return;
       }
       confirmUnsavedChanges(document.body, {
         message:
           "Leaving will close this routine. Save your edits, discard them, or stay on this screen.",
         onSave: () => actions.saveRoutine(),
-        onDiscard: () => actions.selectRoutine(null),
+        onDiscard: () => exitRoutineEditor(),
       });
     },
     exitBlueprintEditorToDetail(planId) {
@@ -288,7 +743,7 @@ export function createApp(root) {
       }
       confirmUnsavedChanges(document.body, {
         message:
-          "Leave the editor? Save your blueprint changes, discard them, or stay on this screen.",
+          "Leave the editor? Save your template changes, discard them, or stay on this screen.",
         onSave: () => {
           actions.saveBlueprint();
           actions.togglePlanEditMode(false);
@@ -343,7 +798,7 @@ export function createApp(root) {
     },
     createBlueprint() {
       const plan = planService.createBlueprint();
-      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: plan.id, notice: "Created a new blueprint." });
+      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: plan.id, notice: "Created a new template." });
       store.setState({ planEditMode: true });
     },
     updateBlueprint(patch) {
@@ -362,7 +817,7 @@ export function createApp(root) {
       }
       if (merged) {
         planService.updateBlueprint(merged.id, merged);
-        syncCollections({ plans: planService.getAllBlueprints(), notice: "Blueprint saved successfully." });
+        syncCollections({ plans: planService.getAllBlueprints(), notice: "Template saved successfully." });
         store.setState({ planEditMode: false });
       }
     },
@@ -389,7 +844,7 @@ export function createApp(root) {
     },
     deleteBlueprint(planId) {
       planService.deleteBlueprint(planId);
-      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: null, notice: "Deleted blueprint." });
+      syncCollections({ plans: planService.getAllBlueprints(), selectedPlanId: null, notice: "Deleted template." });
       store.setState({ planEditMode: false });
     },
     selectActivePlan(planId) {
@@ -588,19 +1043,31 @@ export function createApp(root) {
         activePlans: activePlanService.getAll(),
       });
     },
-    updateSessionReflection(sessionId, reflectionRating) {
-      workoutService.updateSession(sessionId, { reflectionRating });
+    updateSessionReflection(sessionId, patch) {
+      const nextPatch =
+        patch && typeof patch === "object"
+          ? patch
+          : { reflectionRating: patch ?? null };
+      workoutService.updateSession(sessionId, nextPatch);
       syncCollections({
         workouts: workoutService.getAll(),
       });
     },
     deleteActivePlan(planId) {
       const deletedPlan = activePlanService.deleteActivePlan(planId);
+      if (deletedPlan) {
+        const historicalPlans = loadHistoricalPlanSnapshots(archivedPlanStore);
+        const snapshot = createHistoricalPlanSnapshot(deletedPlan, {
+          historyStatus: "removed",
+        });
+        archivedPlanStore.save(upsertHistoricalPlanSnapshot(historicalPlans, snapshot));
+      }
       syncCollections({
         activePlans: activePlanService.getAll(),
+        archivedPlans: loadHistoricalPlanSnapshots(archivedPlanStore),
         selectedActivePlanId: null,
         notice: deletedPlan
-          ? `Removed "${deletedPlan.displayName || deletedPlan.name}" from active plans.`
+          ? `Removed "${deletedPlan.displayName || deletedPlan.name}" from the active queue and preserved it in history.`
           : "Removed the active plan.",
       });
     },
@@ -608,13 +1075,15 @@ export function createApp(root) {
       const plans = activePlanService.getAll();
       const plan = plans.find(p => p.id === planId);
       if (plan) {
-        const archiveStore = createLocalStore("workout-app.archivedPlans.v1");
-        const archived = { ...plan, completedAt: new Date().toISOString() };
-        archiveStore.save([...(archiveStore.load() || []), archived]);
+        const historicalPlans = loadHistoricalPlanSnapshots(archivedPlanStore);
+        const archived = createHistoricalPlanSnapshot(plan, {
+          historyStatus: "archived",
+        });
+        archivedPlanStore.save(upsertHistoricalPlanSnapshot(historicalPlans, archived));
         activePlanService.deleteActivePlan(planId);
         syncCollections({ 
           activePlans: activePlanService.getAll(), 
-          archivedPlans: archiveStore.load(),
+          archivedPlans: loadHistoricalPlanSnapshots(archivedPlanStore),
           notice: `"${plan.displayName || plan.name}" archived and moved into history.` 
         });
       }
@@ -628,6 +1097,19 @@ export function createApp(root) {
       });
     },
     deleteRoutine(routineId) {
+      const currentState = store.getState();
+      const routine = currentState.routines.find((entry) => entry.id === routineId);
+      if (!routine) {
+        store.setState({ notice: "Routine not found." });
+        return;
+      }
+
+      const dependencies = describeRoutineDependencies(routineId, currentState);
+      if (dependencies.activePlans.length || dependencies.blueprints.length) {
+        store.setState({ notice: formatRoutineDependencyNotice(routine.name, dependencies) });
+        return;
+      }
+
       const deleted = routineService.deleteRoutine(routineId);
       syncCollections({
         routines: routineService.getAll(),
@@ -644,19 +1126,41 @@ export function createApp(root) {
     saveRoutine() {
       const draft = store.getState().draftRoutine;
       if (draft) {
+        const currentState = store.getState();
+        const returnRoute = getRoutineEditorReturnRoute(currentState);
+        const parentContext = currentState.detailNavigation?.parent || null;
         const sourceEntries = draft.entries || draft.exercises || [];
         const entries = sourceEntries.map((ex) => {
           const catalogEntry = store.getState().exercises.find((e) => e.id === ex.exerciseId);
           const type = inferRoutineEntryTrackingType(ex, catalogEntry);
+          const explicitBlocks = normalizeRoutineEntryBlocks(ex.entryBlocks ?? ex.blocks);
           const clean = {
             id: ex.id,
             exerciseId: ex.exerciseId,
             order: ex.order,
-            notes: ex.notes,
-            sets: ex.sets,
+            notes: ex.notes ?? "",
+            sets: ex.sets ?? null,
+            reps: ex.reps ?? null,
+            repTargetMode: ex.repTargetMode ?? null,
+            durationSeconds: ex.durationSeconds ?? null,
+            weight: ex.weight ?? null,
             resistance: ex.resistance ?? null,
-            restSeconds: ex.restSeconds,
+            restSeconds: ex.restSeconds ?? null,
+            sideMode: ex.sideMode ?? null,
+            tempoMode: ex.tempoMode ?? null,
+            tempoSecondsPerRep: ex.tempoSecondsPerRep ?? null,
+            tempoDownSeconds: ex.tempoDownSeconds ?? null,
+            tempoBottomHoldSeconds: ex.tempoBottomHoldSeconds ?? null,
+            tempoUpSeconds: ex.tempoUpSeconds ?? null,
+            tempoTopHoldSeconds: ex.tempoTopHoldSeconds ?? null,
+            tempoLabel: ex.tempoLabel ?? null,
+            transitionAfterSeconds: ex.transitionAfterSeconds ?? null,
+            transitionLabel: ex.transitionLabel ?? "",
+            entryBlocks: explicitBlocks,
           };
+          if (explicitBlocks.length) {
+            return clean;
+          }
           if (type === "reps") {
             clean.reps = ex.reps;
             clean.durationSeconds = null;
@@ -685,6 +1189,10 @@ export function createApp(root) {
         routineService.updateRoutine(cleanedRoutine.id, cleanedRoutine);
         syncCollections({ routines: routineService.getAll(), notice: "Routine saved successfully." });
         store.setState({ selectedRoutineId: null, draftRoutine: null });
+        if (returnRoute) {
+          store.setState({ detailNavigation: parentContext });
+          actions.navigate(returnRoute);
+        }
       }
     },
     addExercise(exerciseId) {
@@ -703,6 +1211,17 @@ export function createApp(root) {
           weight: defaultMode === "weight" ? 20 : null,
           resistance: defaultMode === "resistance" ? "Band" : null,
           restSeconds: 45,
+          sideMode: "",
+          tempoMode: null,
+          tempoSecondsPerRep: null,
+          tempoDownSeconds: null,
+          tempoBottomHoldSeconds: null,
+          tempoUpSeconds: null,
+          tempoTopHoldSeconds: null,
+          tempoLabel: null,
+          transitionAfterSeconds: null,
+          transitionLabel: "",
+          entryBlocks: [],
           notes: "",
         };
         store.setState({
@@ -800,14 +1319,7 @@ export function createApp(root) {
     exportRoutines(scope, routineId) {
       const payload = routineService.exportToCsv(scope, routineId);
       const blob = new Blob([payload.csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = payload.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, payload.fileName);
       store.setState({ notice: `Exported ${payload.rowCount} template row${payload.rowCount === 1 ? "" : "s"} to ${payload.fileName}.` });
     },
     async importExercises(file) {
@@ -834,20 +1346,95 @@ export function createApp(root) {
     exportExercises() {
       const payload = exerciseService.exportToCsv();
       const blob = new Blob([payload.csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = payload.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, payload.fileName);
       store.setState({ notice: `Exported ${payload.rowCount} exercise reference${payload.rowCount === 1 ? "" : "s"} to ${payload.fileName}.` });
     },
+    deleteCatalogExercise(exerciseId) {
+      const currentState = store.getState();
+      const exercise = currentState.exercises.find((entry) => entry.id === exerciseId) || null;
+      if (!exercise) {
+        return;
+      }
+      if (!exercise.isCustom) {
+        store.setState({ notice: `"${exercise.name}" is built in and can't be deleted.` });
+        return;
+      }
+
+      const dependencySummary = describeExerciseDependencies(exerciseId, currentState);
+      const dependencyCount =
+        dependencySummary.routines.length
+        + dependencySummary.activePlans.length
+        + dependencySummary.blueprints.length
+        + dependencySummary.workouts.length;
+
+      if (dependencyCount > 0) {
+        store.setState({ notice: formatExerciseDependencyNotice(exercise.name, dependencySummary) });
+        return;
+      }
+
+      const deleted = exerciseService.deleteExercise(exerciseId);
+      if (!deleted) {
+        store.setState({ notice: `Couldn't delete "${exercise.name}".` });
+        return;
+      }
+
+      syncCollections({
+        exercises: exerciseService.getAll(),
+        selectedExerciseId: null,
+        notice: `Deleted "${exercise.name}".`,
+      });
+      actions.navigate("exercises");
+    },
+    deleteBodyTarget(targetId) {
+      const currentState = store.getState();
+      const target = (currentState.bodyTargets || []).find((entry) => entry.id === targetId) || null;
+      if (!target) {
+        return;
+      }
+      if (!target.isCustom) {
+        store.setState({ notice: `"${target.name}" is built in and can't be deleted.` });
+        return;
+      }
+
+      const dependencySummary = describeBodyTargetDependencies(targetId, currentState);
+      if (dependencySummary.exercises.length) {
+        store.setState({ notice: formatBodyTargetDependencyNotice(target.name, dependencySummary) });
+        return;
+      }
+
+      bodyMapRepository.delete(targetId);
+      syncCollections({
+        bodyTargets: bodyMapRepository.getAll(),
+        notice: `Deleted "${target.name}".`,
+      });
+      actions.navigate("body-targets");
+    },
     importFullPlan(data) {
+      const importedBodyTargets = Array.isArray(data?.bodyTargets) ? data.bodyTargets : [];
+      const importedExercises = Array.isArray(data?.exercises)
+        ? data.exercises
+        : Array.isArray(data?.exerciseCatalog)
+          ? data.exerciseCatalog
+          : [];
+
+      if (importedBodyTargets.length) {
+        const bodyTargetMerge = mergeMissingById(bodyMapRepository.getAll(), importedBodyTargets);
+        if (bodyTargetMerge.added.length) {
+          bodyMapRepository.replaceAll(bodyTargetMerge.merged);
+        }
+      }
+
+      if (importedExercises.length) {
+        const exerciseMerge = mergeMissingById(exerciseRepository.list(), importedExercises);
+        if (exerciseMerge.added.length) {
+          exerciseRepository.replaceAll(exerciseMerge.merged);
+        }
+      }
+
       const planId = planService.importFullPlan(data, routineService, exerciseService.getAll());
       syncCollections({
         plans: planService.getAllBlueprints(),
+        exercises: exerciseService.getAll(),
         routines: routineService.getAll(),
         selectedPlanId: planId,
         notice: "Full plan imported successfully.",
@@ -856,32 +1443,45 @@ export function createApp(root) {
     exportFullPlan(planId) {
       const plan = planService.getBlueprint(planId);
       if (!plan) return;
-      const json = planService.exportFullPlan(planId, routineService);
+      const json = planService.exportFullPlan(
+        planId,
+        routineService,
+        exerciseService.getAll(),
+        bodyMapRepository.getAll(),
+      );
       const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${plan.name.toLowerCase().replace(/\s+/g, '-')}-blueprint.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      store.setState({ notice: `Exported "${plan.name}" blueprint successfully.` });
+      triggerBlobDownload(blob, `${plan.name.toLowerCase().replace(/\s+/g, '-')}-template.json`);
+      store.setState({ notice: `Exported "${plan.name}" template successfully.` });
     },
     exportActivePlan(planId) {
       const plan = activePlanService.getActivePlan(planId);
       if (!plan) return;
       const json = planService.exportActivePlan(planId);
       const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${(plan.displayName || plan.name || "active-plan").toLowerCase().replace(/\s+/g, "-")}-export.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, `${(plan.displayName || plan.name || "active-plan").toLowerCase().replace(/\s+/g, "-")}-export.json`);
       store.setState({ notice: `Exported "${plan.displayName || plan.name}" active plan package successfully.` });
+    },
+    async importActivePlanPackage(file) {
+      if (!file) {
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        const importedPlan = planService.importActivePlanPackage(text);
+        syncCollections({
+          activePlans: activePlanService.getAll(),
+          workouts: workoutService.getAll(),
+          routines: routineService.getAll(),
+          exercises: exerciseService.getAll(),
+          notice: `Imported "${importedPlan.displayName || importedPlan.name}" active plan package successfully.`,
+        });
+        router.navigate(`active-plan/${importedPlan.id}`);
+      } catch (error) {
+        store.setState({
+          notice: error.message || `Unable to import ${file.name}.`,
+        });
+      }
     },
     async importActivePlanRevision(planId, file) {
       if (!file) {
@@ -893,7 +1493,7 @@ export function createApp(root) {
         const review = planService.prepareActivePlanRevision(planId, text);
         store.setState({
           pendingActivePlanRevision: review,
-          notice: `Loaded revision package from ${file.name}. Review before applying.`,
+          notice: `Loaded plan update package from ${file.name}. Review before applying.`,
         });
         router.navigate(`active-plan-revision/${planId}`);
       } catch (error) {
@@ -1032,7 +1632,7 @@ export function createApp(root) {
         confirmAction(document.body, {
           title: "Discard unsaved work?",
           message:
-            "You have unsaved blueprint or routine edits and a workout in progress. Leaving discards the workout and any unsaved blueprint or routine changes.",
+            "You have unsaved template or routine edits and a workout in progress. Leaving discards the workout and any unsaved template or routine changes.",
           confirmText: "Discard all",
           cancelText: "Stay",
           onConfirm: () => {
@@ -1067,6 +1667,7 @@ export function createApp(root) {
   };
 
   function syncCollections({
+    bodyTargets,
     exercises,
     selectedExerciseId,
     routines,
@@ -1077,9 +1678,11 @@ export function createApp(root) {
     selectedActivePlanId,
     workouts,
     selectedWorkoutId,
+    selectedHistoryDate,
     archivedPlans,
     notice,
   } = {}) {
+    const nextBodyTargets = bodyTargets ?? bodyMapRepository.getAll();
     const nextExercises = exercises ?? store.getState().exercises;
     const nextExerciseId = normalizeSelectedId(
       nextExercises,
@@ -1099,12 +1702,15 @@ export function createApp(root) {
     const nextActivePlanId = nextActivePlans.some(p => p.id === nextActivePlanIdCandidate) ? nextActivePlanIdCandidate : null;
 
     const nextWorkouts = workouts ?? store.getState().workouts;
-    const nextWorkoutId = normalizeSelectedId(
+    const nextHistorySelection = resolveHistorySelection(
       nextWorkouts,
+      store.getState().selectedHistoryPlanId,
       selectedWorkoutId ?? store.getState().selectedWorkoutId,
+      selectedHistoryDate ?? store.getState().selectedHistoryDate,
     );
 
     store.setState({
+      bodyTargets: nextBodyTargets,
       exercises: nextExercises,
       selectedExerciseId: nextExerciseId,
       routines: nextRoutines,
@@ -1114,7 +1720,9 @@ export function createApp(root) {
       activePlans: nextActivePlans,
       selectedActivePlanId: nextActivePlanId,
       workouts: nextWorkouts,
-      selectedWorkoutId: nextWorkoutId,
+      selectedWorkoutId: nextHistorySelection.selectedWorkoutId,
+      selectedHistoryPlanId: nextHistorySelection.selectedHistoryPlanId,
+      selectedHistoryDate: nextHistorySelection.selectedHistoryDate,
       archivedPlans: archivedPlans ?? store.getState().archivedPlans,
       notice: notice ?? store.getState().notice,
     });
@@ -1134,13 +1742,38 @@ export function createApp(root) {
       return;
     }
 
+    if (state.route.startsWith("exercise/")) {
+      renderExerciseView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route === "body-targets") {
+      renderExerciseView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("body-target/")) {
+      renderExerciseView(outlet, { state, actions });
+      return;
+    }
+
     if (state.route === "plans") {
       renderPlansView(outlet, { state, actions });
       return;
     }
 
+    if (state.route.startsWith("plan-study/")) {
+      renderBlueprintStudyView(outlet, { state, actions });
+      return;
+    }
+
     if (state.route === "active-plans") {
       renderActivePlansView(outlet, { state, actions });
+      return;
+    }
+
+    if (state.route.startsWith("active-plan-study/")) {
+      renderActivePlanStudyView(outlet, { state, actions });
       return;
     }
 
@@ -1164,6 +1797,11 @@ export function createApp(root) {
       return;
     }
 
+    if (state.route.startsWith("routine/")) {
+      renderRoutineDetailView(outlet, { state, actions });
+      return;
+    }
+
     renderRoutineView(outlet, { state, actions });
   }
 
@@ -1171,6 +1809,14 @@ export function createApp(root) {
 
   router.subscribe((route) => {
     store.setState({ route });
+  });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasUnsavedEditableState()) {
+      return;
+    }
+    event.preventDefault();
+    event.returnValue = "";
   });
 
   window.appActions = actions;

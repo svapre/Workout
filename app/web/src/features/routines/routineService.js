@@ -16,10 +16,22 @@ function createEntry(exerciseId, order) {
     order,
     sets: 3,
     reps: 10,
+    repTargetMode: null,
     durationSeconds: null,
     weight: null,
     resistance: null,
     restSeconds: 45,
+    sideMode: "",
+    tempoMode: null,
+    tempoSecondsPerRep: null,
+    tempoDownSeconds: null,
+    tempoBottomHoldSeconds: null,
+    tempoUpSeconds: null,
+    tempoTopHoldSeconds: null,
+    tempoLabel: null,
+    transitionAfterSeconds: null,
+    transitionLabel: "",
+    entryBlocks: [],
     notes: "",
   };
 }
@@ -57,6 +69,7 @@ function parseFieldValue(key, value) {
     "durationSeconds",
     "weight",
     "restSeconds",
+    "transitionAfterSeconds",
     "difficultyScore",
   ]);
 
@@ -187,7 +200,19 @@ export function createRoutineService(repository) {
           const parsedPatch = Object.fromEntries(
             Object.entries(patch).map(([key, value]) => [key, parseFieldValue(key, value)]),
           );
-          return { ...exercise, ...parsedPatch };
+          const shouldResetEntryBlocks = [
+            "sets",
+            "reps",
+            "durationSeconds",
+            "weight",
+            "resistance",
+            "restSeconds",
+          ].some((key) => Object.prototype.hasOwnProperty.call(parsedPatch, key));
+          return {
+            ...exercise,
+            ...parsedPatch,
+            ...(shouldResetEntryBlocks ? { entryBlocks: [] } : {}),
+          };
         });
 
         return withTimestamp({ ...routine, entries: nextEntries, exercises: undefined });

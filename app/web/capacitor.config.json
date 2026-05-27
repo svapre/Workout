@@ -1,0 +1,8 @@
+{
+  "appId": "com.workout.app",
+  "appName": "Workout",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

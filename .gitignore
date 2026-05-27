@@ -22,3 +22,29 @@ Thumbs.db
 
 # Node
 node_modules/
+
+# Local audit output / scratch content
+artifacts/
+screenshots/
+screenshots-e2e/
+app/web/screenshots/
+app/web/screenshots-e2e/
+app/web/test-results/
+plans/exports/
+plans/imports/
+app/web/playwright-test.mjs
+app/web/e2e-plan-workflow.mjs
+app/web/ppl-beginner.json
+app/web/serve.py
+
+# Server logs
+app/web/server*.log
+
+# Build output
+app/web/dist/
+app/web/Workout-debug.apk
+app/web/android/
+
+# AutoHotkey scratch
+BornAgainMacro_preview.ahk
+

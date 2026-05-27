@@ -2,6 +2,7 @@ import { createId } from "../../core/uid.js";
 import {
   joinGoals,
   mapTrackingType,
+  normalizeRoutineEntryBlocks,
   normalizeTrackingModes,
   PRIMARY_MUSCLE_NAME_TO_BODY_MAP_ID,
   validateMilestoneTestAgainstExercise,
@@ -90,6 +91,7 @@ function normalizeExerciseCatalogItem(item, usedSlugs) {
     category: item.category?.trim() || "strength",
     type: item.type?.trim() || "physical",
     trackingType,
+    executionUnitType: item.executionUnitType?.trim() || item.execution_unit_type?.trim() || "",
     supportedTrackingModes: normalizeTrackingModes(
       item.supportedTrackingModes ?? item.supported_tracking_modes,
       trackingType,
@@ -279,6 +281,7 @@ function normalizeRoutineExercise(
     order,
     sets: Number.isFinite(Number(item.sets ?? item.targetSets)) ? Number(item.sets ?? item.targetSets) : 0,
     reps: Number.isFinite(Number(item.reps ?? item.targetReps)) ? Number(item.reps ?? item.targetReps) : null,
+    repTargetMode: item.repTargetMode?.trim() || null,
     durationSeconds: Number.isFinite(Number(item.durationSeconds ?? item.targetDurationSec))
       ? Number(item.durationSeconds ?? item.targetDurationSec)
       : null,
@@ -289,6 +292,35 @@ function normalizeRoutineExercise(
     restSeconds: Number.isFinite(Number(item.restSeconds ?? item.restSec))
       ? Number(item.restSeconds ?? item.restSec)
       : null,
+    sideMode: item.sideMode?.trim() || "",
+    tempoMode: item.tempoMode?.trim() || null,
+    tempoSecondsPerRep: Number.isFinite(Number(item.tempoSecondsPerRep ?? item.secondsPerRep ?? item.cadenceSeconds))
+      ? Number(item.tempoSecondsPerRep ?? item.secondsPerRep ?? item.cadenceSeconds)
+      : null,
+    tempoDownSeconds: Number.isFinite(Number(item.tempoDownSeconds ?? item.downSeconds ?? item.eccentricSeconds))
+      ? Number(item.tempoDownSeconds ?? item.downSeconds ?? item.eccentricSeconds)
+      : null,
+    tempoBottomHoldSeconds: Number.isFinite(Number(
+      item.tempoBottomHoldSeconds ?? item.bottomHoldSeconds ?? item.pauseBottomSeconds,
+    ))
+      ? Number(item.tempoBottomHoldSeconds ?? item.bottomHoldSeconds ?? item.pauseBottomSeconds)
+      : null,
+    tempoUpSeconds: Number.isFinite(Number(item.tempoUpSeconds ?? item.upSeconds ?? item.concentricSeconds))
+      ? Number(item.tempoUpSeconds ?? item.upSeconds ?? item.concentricSeconds)
+      : null,
+    tempoTopHoldSeconds: Number.isFinite(Number(
+      item.tempoTopHoldSeconds ?? item.topHoldSeconds ?? item.pauseTopSeconds,
+    ))
+      ? Number(item.tempoTopHoldSeconds ?? item.topHoldSeconds ?? item.pauseTopSeconds)
+      : null,
+    tempoLabel: item.tempoLabel?.trim() || item.tempo?.trim() || null,
+    transitionAfterSeconds: Number.isFinite(
+      Number(item.transitionAfterSeconds ?? item.transitionSec),
+    )
+      ? Number(item.transitionAfterSeconds ?? item.transitionSec)
+      : null,
+    transitionLabel: item.transitionLabel?.trim() || item.transitionCue?.trim() || "",
+    entryBlocks: normalizeRoutineEntryBlocks(item.entryBlocks ?? item.blocks),
     notes: item.notes?.trim() || "",
   };
 }
