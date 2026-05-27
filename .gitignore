@@ -48,3 +48,7 @@ app/web/android/
 # AutoHotkey scratch
 BornAgainMacro_preview.ahk
 
+# Design asset working directories
+art/
+plans/test-suite/
+
