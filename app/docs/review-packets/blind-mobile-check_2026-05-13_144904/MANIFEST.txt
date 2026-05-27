@@ -1,0 +1,20 @@
+blind-mobile-check_2026-05-13_144904
+
+Files in this packet:
+- screen-01-mobile.png
+- screen-02-mobile.png
+- screen-03-mobile.png
+- screen-04-mobile.png
+- screen-05-mobile.png
+- screen-06-mobile.png
+- screen-07-mobile.png
+- screen-08-mobile.png
+- screen-09-mobile.png
+- screen-10-mobile.png
+- PROMPT_FOR_WEB_BLIND_REVIEW.txt
+- MANIFEST.txt
+
+Notes:
+- This is a blind review packet.
+- Filenames are intentionally neutral.
+- All screenshots are mobile-portrait captures from the same app.

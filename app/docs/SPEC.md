@@ -1,6 +1,6 @@
 # Data Specification
-Last updated: 2026-05-08
-Version: 1.2
+Last updated: 2026-05-09
+Version: 1.6
 
 Any AI working on this project MUST read this file before
 touching any data layer code.
@@ -34,6 +34,7 @@ bm_hamstrings, bm_calves, bm_hip_flexors, bm_neck
   description: string,
   type: "physical" | "mobility" | "mental" | "custom",
   trackingType: "reps" | "duration" | "weight" | "resistance", // default / preferred mode
+  executionUnitType: "rep" | "timed" | "cycle",                // intrinsic unit owned by the activity
   supportedTrackingModes: ["reps" | "duration" | "weight" | "resistance"],
   bodyTargets: [bodyMapId],
   equipment: [string],
@@ -45,6 +46,8 @@ bm_hamstrings, bm_calves, bm_hip_flexors, bm_neck
   isCustom: boolean
 }
 Rule: `trackingType` is the exercise's default/preferred tracking mode.
+Rule: `executionUnitType` describes the base thing the user performs once
+(for example one rep, one timed interval, or one breath/practice cycle).
 `supportedTrackingModes` defines the valid tracking modes the exercise can
 be prescribed or tested with. Exact reps/duration/weight/resistance values
 still live on routine entries or milestone tests, not on the base exercise.
@@ -74,11 +77,64 @@ with unrelated variants.
       durationSeconds: number | null,
       weight: number | null,
       resistance: string | null,
-      restSeconds: number | null,
+      restSeconds: number | null,           // between sets of the same activity
+      sideMode: "" | "each_side_then_switch" | "alternating",
+      tempoMode: "cadence" | "phased" | null,
+      tempoSecondsPerRep: number | null,
+      tempoDownSeconds: number | null,
+      tempoBottomHoldSeconds: number | null,
+      tempoUpSeconds: number | null,
+      tempoTopHoldSeconds: number | null,
+      tempoLabel: string | null,
+      transitionAfterSeconds: number | null, // after the final set before the next activity
+      transitionLabel: string,
+      entryBlocks: [
+        {
+          id: string,
+          type: "work" | "rest" | "switch_side",
+          label: string,
+          metricType: "reps" | "duration" | null,
+          side: "left" | "right" | "both" | "alternating" | null,
+          repTargetMode: "exact" | "max" | "minimum_plus" | null, // exact = fixed, max = open-ended, minimum_plus = hit the floor then keep going
+          reps: number | null,
+          durationSeconds: number | null,
+          weight: number | null,
+          resistance: string | null,
+          seconds: number | null,           // used by rest blocks
+          holdSeconds: number | null,       // e.g. hold each reach for 2s
+          tempoMode: "cadence" | "phased" | null,
+          tempoSecondsPerRep: number | null,
+          tempoDownSeconds: number | null,
+          tempoBottomHoldSeconds: number | null,
+          tempoUpSeconds: number | null,
+          tempoTopHoldSeconds: number | null,
+          tempoLabel: string | null,        // e.g. "Slow control"
+          effort: string | null,            // e.g. "failure"
+          notes: string
+        }
+      ],
       notes: string
     }
   ]
 }
+
+Rule: simple routine entries may omit `entryBlocks`; the app will derive
+repeated work/rest blocks from `sets`, `reps` / `durationSeconds`, and
+`restSeconds`.
+Rule: simple routine entries may also define optional tempo defaults; any
+derived work blocks inherit those values so the player can later follow a
+tempo cue without requiring explicit block authoring.
+Rule: simple unilateral entries may use `sideMode`; the app will derive
+`left -> switch_side -> right` work blocks from that setting so the
+routine can still be rendered and played as an explicit flow.
+Rule: when `entryBlocks` is present, it becomes the explicit nested
+execution plan for that activity entry.
+Rule: `restSeconds` still means between-set rest inside the same activity,
+while `transitionAfterSeconds` remains the between-activity handoff after
+the final work block.
+Rule: the routine is the executable source of truth for the player; if the
+player needs a separate screen for it, it should exist as a distinct block
+in the routine flow.
 
 ---
 
@@ -96,6 +152,7 @@ Static template. Locked at creation. Not modified during use.
     {
       id: string,
       name: string,
+      guidance: string,
       predecessorStageId: string | null,
       schedule: [
         { type: "routine" | "rest", routineId: string | null }
@@ -123,7 +180,14 @@ Static template. Locked at creation. Not modified during use.
         onFailure: {
           action: "restart_stage" | "goto_stage" | "none",
           targetStageId: string | null
-        }
+        },
+        feedbackPrompts: [
+          {
+            id: string,
+            label: string,
+            placeholder: string
+          }
+        ]
       },
       transitionRule: "prompt_user" | "manual"
     }
@@ -137,6 +201,8 @@ Milestone model:
 - `source: "stage_entry"` means the test inherits exercise details from a routine entry already in the stage schedule
 - `source: "custom"` means the test defines its own exercise details directly in the milestone
 - `weight` and `resistance` are pass conditions for the test, while `metric` stays limited to `reps` or `duration`
+- `feedbackPrompts` are optional post-session check-ins for symptom-led or subjective stages; the app stores responses but does not interpret them automatically
+- `guidance` is the readable chapter-style explanation of what the stage is for; stage-level equipment is derived from the routines and milestone test exercise inside that stage
 
 ---
 
@@ -206,6 +272,13 @@ Active plan stores session IDs in sessions array only.
     result: "passed" | "failed" | null
   } | null,
   reflectionRating: "strong" | "normal" | "difficult" | null,
+  feedbackResponses: [
+    {
+      promptId: string,
+      label: string,
+      response: string
+    }
+  ],
   sets: [
     {
       exerciseId: string,
@@ -226,7 +299,7 @@ Active plan stores session IDs in sessions array only.
   exportVersion: "1.0",
   exportedAt: timestamp,
   activePlan: { ...full active plan },
-  sessions: [ ...all session records including reflectionRating ],
+  sessions: [ ...all session records including reflectionRating and feedbackResponses ],
   exercises: [ ...referenced exercises ],
   routines: [ ...referenced routines ],
   bodyTargets: [ ...referenced body map entries ]
@@ -235,11 +308,23 @@ Active plan stores session IDs in sessions array only.
 ---
 
 ## LOCALSTORAGE KEYS
-workout-app.state.v1       → { routines }
-workout-app.exercises.v1   → { exercises }
-workout-app.workouts.v1    → { workouts (sessions) }
-workout-app.plans.v1       → { plan_blueprints }
-workout-app.activePlans.v1 → { active_plans }
-workout-app.archivedPlans.v1 → archived plan array
-workout-app.bodymap.v1     → { bodyMap entries }
+workout-app.state.v1       -> { routines }
+workout-app.exercises.v1   -> { exercises }
+workout-app.workouts.v1    -> { workouts (sessions) }
+workout-app.plans.v1       -> { plan_blueprints }
+workout-app.activePlans.v1 -> { active_plans }
+workout-app.archivedPlans.v1 -> historical plan snapshots
+workout-app.bodymap.v1     -> { bodyMap entries }
+workout-app.meta.v1        -> { starterContentVersion, starterContentSyncedAt }
+
+Historical plan snapshots in `workout-app.archivedPlans.v1` reuse the
+active-plan shape for retrospective review and add read-only history
+metadata:
+{
+  ...activePlan,
+  historyStatus: "archived" | "removed",
+  historyRecordedAt: timestamp,
+  completedAt: timestamp | null,
+  removedAt: timestamp | null
+}
 ---

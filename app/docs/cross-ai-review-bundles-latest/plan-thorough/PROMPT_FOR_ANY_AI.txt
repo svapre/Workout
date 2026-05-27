@@ -1,0 +1,121 @@
+Use files directly from:
+`app/docs/cross-ai-review-bundles-latest/plan-thorough/`
+
+This is an informed plan-family review packet, not the default blind UX review workflow.
+Use it only when you intentionally want a contract-aware architecture review.
+If you want a more human-like first-impression review, use `app/docs/BLIND_REVIEW_PROMPT.md` with screenshots only in a separate fresh chat.
+
+This review must happen in a SINGLE RESPONSE, but in FOUR STRICT PHASES.
+Do not collapse the phases together.
+Do not use the contracts early just because they are attached.
+
+Packet files in scope:
+- `PROMPT_FOR_ANY_AI.txt`
+- `PLAN_REVIEW_BRIEF.md`
+- `SCREEN_CONTRACTS.md`
+- `PLAN_SURFACE_REDESIGN_CONTRACT.md`
+- `PLAN_INTERACTION_CONTRACT.md`
+- `01-mobile-active-plans-list.png`
+- `02-mobile-active-plan-detail.png`
+- `03-mobile-active-plan-study.png`
+- `04-mobile-plans-list.png`
+- `05-mobile-blueprint-detail.png`
+- `06-mobile-blueprint-study.png`
+- `07-mobile-blueprint-editor.png`
+- `08-mobile-stage-editor.png`
+- `09-desktop-active-plans-list.png`
+- `10-desktop-active-plan-detail.png`
+- `11-desktop-active-plan-study.png`
+- `12-desktop-blueprint-detail.png`
+- `13-desktop-blueprint-study.png`
+- `14-tablet-landscape-blueprint-editor.png`
+- `15-tablet-landscape-stage-editor.png`
+
+Review goal:
+- pressure-test the plan family
+- judge mobile first, desktop second
+- separate what the UI communicates on its own from what the contracts intended
+
+Important rules:
+- Be critical.
+- Treat this as an independent review.
+- Do not assume the current direction is correct.
+- In Phase 1 and Phase 2, ignore the docs completely.
+- In Phase 3, use the docs and explicitly note where they change or confirm your earlier reading.
+- If web access is available, you may use it only in Phase 3 as supporting context.
+- If your interpretation changes after reading the docs, do not rewrite Phase 1. Record the change explicitly in Phase 3.
+
+Context for terminology only:
+- Activity = canonical identity record
+- Routine = executable script built from activity blocks
+- Stage = progression layer
+- Blueprint = static template
+- Active Plan = living runtime version of a plan
+
+PHASE 1 - BLIND SCREENSHOT READ
+Use screenshots only.
+Do not use any docs yet.
+
+Answer:
+1. What is each screen trying to help the user do?
+2. What are the main objects on each screen?
+3. What does each major card, row, chip, badge, and section appear to represent?
+4. Which elements appear interactive?
+5. What do you think each tap would probably do?
+6. Which labels feel vague, duplicated, internal, or misleading?
+7. Which screens feel mobile-first and which feel desktop-derived?
+
+PHASE 2 - TASK INFERENCE
+Still use screenshots only.
+Do not use docs yet.
+
+Walk through these tasks from the visible UI:
+- Start today's workout from the active plans surface.
+- Understand what the current stage is trying to achieve.
+- Find what unlocks a later stage.
+- Compare two blueprints before choosing one.
+- Open a specific stage to study it.
+- Edit a blueprint and then edit a stage inside it.
+
+For each task, explain:
+- likely starting point
+- likely next tap
+- where a first-time user would hesitate
+- whether the task feels easy, mixed, or fragile
+
+PHASE 3 - CONTRACT CHECK
+Now use the packet docs:
+- `PLAN_REVIEW_BRIEF.md`
+- `SCREEN_CONTRACTS.md`
+- `PLAN_SURFACE_REDESIGN_CONTRACT.md`
+- `PLAN_INTERACTION_CONTRACT.md`
+
+Answer:
+1. Where does the UI match the intended hierarchy and screen ownership?
+2. Where does it violate the contracts?
+3. Which repeated objects are still inconsistent?
+4. Is the interaction language coherent?
+5. Which parts of the contracts are strong, weak, too rigid, or missing?
+6. What changed between your screenshot-only reading and your contract-aware reading?
+
+PHASE 4 - FINAL DECISION
+End with a concrete decision:
+- `Freeze`
+- `One narrow pass, then freeze`
+- `Not ready`
+
+Also include:
+- Green / Yellow / Red status by major screen
+- top 3 to 5 confirmed problems
+- highest-leverage next pass
+- what can be frozen now
+- what should not be frozen yet
+- what is ready for beautification now versus still needs framework work
+
+Please structure your answer exactly as:
+- Phase 1 - Blind Screenshot Read
+- Phase 2 - Task Inference
+- Phase 3 - Contract Check
+- Phase 4 - Final Decision
+
+Please cite the relevant screenshot filenames and, in Phase 3 only, the relevant contract filenames.

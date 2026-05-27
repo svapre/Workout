@@ -1,0 +1,110 @@
+Please review this UI architecture using BOTH:
+1. the attached screenshots
+2. actual web research on comparable products and platform guidance
+
+Important:
+- This is a STRUCTURE / INFORMATION-ARCHITECTURE review, not a beautification review.
+- Do not rely on intuition alone.
+- Please do real web research before answering.
+- Please explicitly reference what patterns you found in real products/guidelines.
+- Please challenge the current direction if it is weak.
+
+Scope for this review:
+- Routine Detail execution grammar
+- Workout Player execution flow
+- The contract between the routine and the player
+
+Context:
+This app is a structured training / practice app with this hierarchy:
+- Activity = canonical identity record
+- Routine = executable script built from activity blocks
+- Stage = progression layer
+- Plan / Active Plan = higher-level structure and runtime state
+
+Current architectural rule:
+- The routine is the source of truth for the player.
+- If the player needs a distinct screen/state for something, that thing should exist as a distinct block in the routine.
+
+Current routine/player model:
+- Activity entry = parent block
+- Nested blocks inside an entry:
+  - work
+  - rest
+  - switch_side
+- Between-entry connector:
+  - transition / reset before next activity
+
+Recent changes:
+- Rep-based work blocks now use explicit rep goals:
+  - `exact`
+  - `max`
+  - `minimum_plus` (e.g. `6+ reps`)
+- `Max reps` is no longer shown as a separate effort chip in rep blocks
+- Routine Detail now uses a flow-first execution lane rather than a document/table-first presentation
+- Tempo is now rendered as explicit phase guidance instead of shorthand:
+  - phased example: `Down 3s`, `Bottom hold 1s`, `Up 1s`, `Top hold 1s`
+  - cadence example: `Each rep 4s`
+- Player now shows open-ended rep goals as a `Goal` fact and asks for `Actual reps`
+- Seeded manual-check content now includes:
+  - `Parameter Extremes Routine`
+  - `Max Reps Check`
+
+Stress-test cases represented in the screenshots:
+- A dense parameter-heavy unilateral block:
+  - side
+  - rep goal
+  - load
+  - hold
+  - phased tempo
+  - switch side
+  - set rest
+  - between-activity transition
+- A minimal timed block
+- Switch-side, set-rest, alternating timed, and transition player screens
+
+What is still unresolved:
+1. Is the execution grammar now clear enough at a glance?
+2. Are work, rest, switch-side, and between-activity transition distinct enough from each other?
+3. Does the flow-first routine detail now feel like an executable path rather than a document?
+4. Is the routine detail dense enough, or still wasting space?
+5. Does the player now feel like it is following the routine script exactly?
+6. Are the new rep-goal labels (`6 reps`, `6+ reps`, `Max reps`) structurally clearer than the previous `reps + AMRAP` split?
+7. Is the explicit tempo language/visual treatment clear enough without relying on shorthand like `3-1-1-1`?
+8. What still needs framework work before:
+   - further player refinement
+   - sound / haptics
+   - beautification
+
+Please use the screenshots to evaluate:
+- Routine Detail desktop
+- Routine Detail phone with max-parameter case
+- Player work screen with parameter-heavy rep goal
+- Player switch-side screen
+- Player set-rest screen
+- Player between-activity transition screen
+- Player alternating timed screen
+- Player minimal duration-only screen
+
+Please also do web research on:
+- Apple HIG / Material guidance for hierarchical lists, grouped content, and progressive disclosure
+- workout trackers / strength apps (set-centric execution)
+- interval timers / circuit timers (work / rest / transition modeling)
+- visual-flow / block-style programming UIs if relevant for grouping / nesting patterns
+
+Please answer these questions:
+1. What is structurally working now?
+2. What is still structurally wrong or ambiguous?
+3. Is the routine/player block contract sound?
+4. Is the nesting pattern clear enough, or should it change?
+5. Is the flow-first routine detail overview now the right default, or should it become more table-like / list-like / grouped differently?
+6. Are the rep-goal semantics now clear enough, or is one more contract pass needed?
+7. Is the explicit tempo representation clear enough, or does it still need framework work?
+8. Do we still need another framework pass before beautification?
+
+Please structure your response as:
+- Screenshot-based review
+- Research findings from real products/guidelines
+- What is working
+- What is still structurally wrong
+- Recommended routine/player refinements
+- Whether another framework pass is needed before beautification

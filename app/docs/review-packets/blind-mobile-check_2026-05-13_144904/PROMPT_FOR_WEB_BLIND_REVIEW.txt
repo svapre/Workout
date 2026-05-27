@@ -1,0 +1,42 @@
+Use the screenshots in this folder only.
+
+Treat this as a blind mobile UX review.
+Do not assume any code, contracts, implementation details, or hidden app behavior.
+Review only what is visible in the screenshots.
+
+Important rules:
+- These filenames are intentionally neutral.
+- Assume this is one mobile-portrait app.
+- Do not infer more than the screenshots support.
+- If something is uncertain, say so.
+- Label findings as `Observed`, `Unclear`, or `Inferred`.
+- Treat only `Observed` issues as confirmed UX problems.
+
+Please answer in this order:
+
+1. What is each screen trying to help the user do?
+2. What are the main objects on each screen?
+3. Which elements appear interactive?
+4. What do you think happens when each major interactive element is tapped?
+5. Which labels feel vague, duplicated, internal, or misleading?
+6. Which screens feel genuinely mobile-first, and which feel cramped or desktop-derived?
+
+Then evaluate these cross-screen user tasks based only on the screenshots:
+- figure out what to do next right now
+- understand the current stage of a live plan
+- understand how stage study works on phone
+- decide whether to start from a blueprint
+- understand what archived and removed plan history mean
+- understand what the live-plan edit and remap-review screens are asking the user to do
+
+For those tasks, say which ones feel:
+- Easy
+- Mixed
+- Fragile
+
+Finish with:
+- Top 5 `Observed` mobile UX problems
+- Anything that is still `Unclear from UI`
+- A final verdict: `No clear blocker`, `One narrow pass`, or `Clear blocker`
+
+Keep the review grounded in what a first-time mobile user would understand from the UI alone.

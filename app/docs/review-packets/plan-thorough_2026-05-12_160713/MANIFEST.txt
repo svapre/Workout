@@ -1,0 +1,26 @@
+Plan thorough review packet
+Generated: 2026-05-12 16:07:13
+Folder: D:\code\Workout\app\docs\review-packets\plan-thorough_2026-05-12_160713
+Source screenshots: D:\code\Workout\screenshots\mobile-ui-audit ; D:\code\Workout\screenshots\responsive-ui-audit
+
+Files:
+- 01-mobile-active-plans-list.png
+- 02-mobile-active-plan-detail.png
+- 03-mobile-active-plan-study.png
+- 04-mobile-plans-list.png
+- 05-mobile-blueprint-detail.png
+- 06-mobile-blueprint-study.png
+- 07-mobile-blueprint-editor.png
+- 08-mobile-stage-editor.png
+- 09-desktop-active-plans-list.png
+- 10-desktop-active-plan-detail.png
+- 11-desktop-active-plan-study.png
+- 12-desktop-blueprint-detail.png
+- 13-desktop-blueprint-study.png
+- 14-tablet-landscape-blueprint-editor.png
+- 15-tablet-landscape-stage-editor.png
+- PLAN_REVIEW_BRIEF.md
+- PLAN_SURFACE_REDESIGN_CONTRACT.md
+- PLAN_INTERACTION_CONTRACT.md
+- SCREEN_CONTRACTS.md
+- PROMPT_FOR_ANY_AI.txt

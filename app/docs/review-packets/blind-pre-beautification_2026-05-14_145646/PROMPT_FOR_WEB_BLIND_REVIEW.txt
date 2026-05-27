@@ -1,0 +1,30 @@
+You are reviewing a mobile portrait app as a first-time UX reviewer.
+
+Use only what is visible in the screenshots.
+Do not assume access to code, contracts, implementation notes, or hidden behavior.
+
+Important rules:
+- Treat this as a blocker-only review before beautification.
+- Do not relitigate overall app architecture unless you see a clear usability failure.
+- Do not assume the app should choose one active plan for the user; multiple active plans may be intentional.
+- Ignore unusual content names unless the naming pattern itself harms understanding.
+- Label findings as `Observed`, `Unclear`, or `Inferred`.
+- Only treat something as a blocker if it would likely confuse, mislead, or stall a first-time mobile user on a key task.
+
+Please review these screenshots and answer with:
+
+1. What each screen is trying to help the user do.
+2. The main interactive elements that are visible.
+3. Cross-screen task evaluation for:
+   - understanding what to do next from the home screen
+   - understanding one active plan and starting a workout
+   - browsing workout history when multiple plans exist
+   - understanding the activity/routine library surfaces
+   - understanding the live-plan edit and save-review flow
+4. The top 3-5 remaining mobile UX problems, if any.
+5. A final verdict using exactly one of:
+   - `No clear blocker`
+   - `One narrow pass`
+   - `Significant blocker`
+
+Please optimize for practical usability judgment, not style preference.

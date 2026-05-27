@@ -1,0 +1,13 @@
+blind-mobile-confirm_2026-05-13_170042
+
+Files:
+- screen-01-mobile.png <- screenshots/mobile-ui-audit/10-plan-detail.png
+- screen-02-mobile.png <- screenshots/mobile-ui-audit/10b-plan-study.png
+- screen-03-mobile.png <- screenshots-e2e/live-plan-editor/07-history-after-revision.png
+- screen-04-mobile.png <- screenshots-e2e/plan-lifecycle-audit/06-history-archived-plan.png
+- screen-05-mobile.png <- screenshots-e2e/plan-lifecycle-audit/07-history-removed-plan.png
+- screen-06-mobile.png <- screenshots-e2e/live-plan-editor/01-editor-start.png
+- screen-07-mobile.png <- screenshots-e2e/live-plan-editor/03-remap-review.png
+- screen-08-mobile.png <- screenshots-e2e/live-plan-editor/04-remap-applied.png
+- PROMPT_FOR_WEB_BLIND_REVIEW.txt
+- MANIFEST.txt

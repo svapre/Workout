@@ -1,0 +1,102 @@
+Please review this UI architecture using BOTH:
+1. the attached screenshots
+2. actual web research on comparable products and platform guidance
+
+Important:
+- This is a STRUCTURE / INFORMATION-ARCHITECTURE review, not a beautification review.
+- Do not rely on intuition alone.
+- Please do real web research before answering.
+- Please explicitly reference what patterns you found in real products/guidelines.
+- Please challenge the current direction if it is weak.
+
+Scope for this review:
+- Routine Detail execution grammar
+- Workout Player execution flow
+- The contract between the routine and the player
+
+Context:
+This app is a structured training / practice app with this hierarchy:
+- Activity = canonical identity record
+- Routine = executable script built from activity blocks
+- Stage = progression layer
+- Plan / Active Plan = higher-level structure and runtime state
+
+Current architectural rule:
+- The routine is the source of truth for the player.
+- If the player needs a distinct screen/state for something, that thing should exist as a distinct block in the routine.
+
+Current routine/player model:
+- Activity entry = parent block
+- Nested blocks inside an entry:
+  - work
+  - rest
+  - switch_side
+- Between-entry connector:
+  - transition / reset before next activity
+
+Recent changes:
+- Work blocks can now explicitly own:
+  - metricType (`reps` or `duration`)
+  - side (`left`, `right`, `both`, `alternating`)
+  - holdSeconds
+  - tempoLabel
+- Simple unilateral entries can use `sideMode`, which auto-expands into explicit left / switch / right flow
+- Routine Detail now renders denser script cells for block facts like side / target / load / hold / tempo
+- Player now reads block-level metrics directly, so timed alternating blocks no longer show irrelevant rep inputs
+
+Stress-test cases in the screenshots:
+- Split Squat:
+  - left side
+  - switch side
+  - right side
+  - set rest
+  - later transition to Bird Dog
+- Bird Dog:
+  - left reach with hold-per-rep
+  - switch side
+  - right reach with hold-per-rep
+  - alternating timed pattern with hold + tempo
+
+What is still unresolved:
+1. Is the execution grammar now clear enough at a glance?
+2. Do the grouped activity blocks and nested child blocks read correctly?
+3. Are work, rest, switch-side, and between-activity transition distinct enough from each other?
+4. Is the routine detail dense enough, or still wasting space?
+5. Does the player now feel like it is following the routine script exactly?
+6. What still needs framework work before:
+   - explicit block editor
+   - timed playback / haptics / sound
+   - beautification
+
+Please use the screenshots to evaluate:
+- Routine Detail desktop
+- Routine Detail phone-landscape
+- Player work screen
+- Player switch-side screen
+- Player set-rest screen
+- Player between-activity transition screen
+- Player side-specific Bird Dog screen
+- Player alternating timed Bird Dog screen
+
+Please also do web research on:
+- Apple HIG / Material guidance for hierarchical lists, grouped content, and progressive disclosure
+- workout trackers / strength apps (set-centric execution)
+- interval timers / circuit timers (work / rest / transition modeling)
+- visual-flow / block-style programming UIs if relevant for grouping / nesting patterns
+
+Please answer these questions:
+1. What is structurally working now?
+2. What is still structurally wrong or ambiguous?
+3. Is the routine/player block contract sound?
+4. Is the nesting pattern clear enough, or should it change?
+5. Is the execution row geometry good enough, or should it become more table-like / list-like / grouped differently?
+6. What should be fixed before explicit block editing and timed playback begin?
+7. Do we still need another framework pass before beautification?
+
+Please structure your response as:
+- Screenshot-based review
+- Research findings from real products/guidelines
+- What is working
+- What is still structurally wrong
+- Recommended routine/player refinements
+- Whether another framework pass is needed before beautification

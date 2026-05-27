@@ -1,0 +1,114 @@
+Use files directly from:
+`app/docs/claude-ui-language-review-bundle-latest/`
+
+This review must happen in a SINGLE RESPONSE, but in FOUR STRICT PHASES.
+Do not collapse the phases together.
+Do not use the contracts early just because they are attached.
+
+Files in scope:
+- `PROMPT_FOR_CLAUDE.txt`
+- `UI_LANGUAGE_REVIEW_BRIEF.md`
+- `UI_LANGUAGE_CONTRACT.md`
+- `MOBILE_COMPACT_VIEW_CONTRACT.md`
+- `SCREEN_CONTRACTS.md`
+- `01-mobile-active-plans-list.png`
+- `02-mobile-active-plan-detail.png`
+- `03-mobile-active-plan-study.png`
+- `04-mobile-exercise-library.png`
+- `05-mobile-exercise-detail.png`
+- `06-mobile-routines-list.png`
+- `07-mobile-blueprint-list.png`
+- `08-mobile-blueprint-detail.png`
+- `09-mobile-blueprint-study.png`
+- `10-mobile-blueprint-editor.png`
+- `11-mobile-stage-editor.png`
+- `12-mobile-workouts.png`
+- `13-desktop-routine-detail.png`
+- `14-desktop-active-plan-study.png`
+- `15-desktop-blueprint-study.png`
+
+Review goal:
+- judge whether the app explains itself clearly on portrait phone
+- pressure-test naming, compact-view behavior, and cross-app consistency
+- separate what the UI communicates on its own from what the contracts intended
+
+Important rules:
+- Be critical.
+- Treat this as an independent review.
+- In Phase 1 and Phase 2, ignore the docs completely.
+- In Phase 3, use the docs and explicitly note where they change or confirm your earlier reading.
+- If your interpretation changes after reading the docs, do not rewrite Phase 1. Record the change explicitly in Phase 3.
+
+Context for terminology only:
+- Activity = canonical movement or practice identity
+- Routine = executable script built from activities
+- Stage = progression layer made of routines, rest, prompts, and milestones
+- Blueprint = static template made of stages
+- Active Plan = live runtime version of a blueprint
+
+PHASE 1 - BLIND SCREENSHOT READ
+Use screenshots only.
+Do not use any docs yet.
+
+Answer:
+1. What is each screen for?
+2. What is each major object or card?
+3. Which labels are clear and which feel vague, internal, duplicated, or misleading?
+4. Which elements appear interactive?
+5. What do you think happens when tapped?
+6. Which screens feel mobile-first and which feel compressed from desktop?
+
+PHASE 2 - TASK INFERENCE
+Still use screenshots only.
+Do not use docs yet.
+
+Walk through these tasks:
+- Find a specific activity and open it.
+- Understand what an activity card is telling you at a glance.
+- Compare routines quickly from the routine list.
+- Compare two blueprints before opening one.
+- Understand what the current active plan wants you to do next.
+- Review a past session from history.
+
+For each task, explain:
+- likely starting point
+- likely next tap
+- where a first-time user would hesitate
+- whether the task feels easy, mixed, or fragile
+
+PHASE 3 - CONTRACT CHECK
+Now use these docs:
+- `UI_LANGUAGE_REVIEW_BRIEF.md`
+- `UI_LANGUAGE_CONTRACT.md`
+- `MOBILE_COMPACT_VIEW_CONTRACT.md`
+- `SCREEN_CONTRACTS.md`
+
+Answer:
+1. Does the UI match the intended naming and compact-view rules?
+2. Which compact surfaces are still too descriptive or too vague?
+3. Which repeated objects are still inconsistent across the app?
+4. Which labels are still too internal or author-facing?
+5. Where does the phone UI still feel desktop-derived?
+6. What changed between your screenshot-only reading and your contract-aware reading?
+
+PHASE 4 - FINAL DECISION
+End with a concrete decision:
+- `Freeze`
+- `One narrow pass, then freeze`
+- `Not ready`
+
+Also include:
+- Green / Yellow / Red status by major surface
+- top 3 to 5 confirmed problems
+- highest-leverage next pass
+- what can be frozen now
+- what should not be frozen yet
+- what is ready for beautification now versus still needs framework work
+
+Please structure your answer exactly as:
+- Phase 1 - Blind Screenshot Read
+- Phase 2 - Task Inference
+- Phase 3 - Contract Check
+- Phase 4 - Final Decision
+
+Please cite the relevant screenshot filenames and, in Phase 3 only, the relevant contract filenames.

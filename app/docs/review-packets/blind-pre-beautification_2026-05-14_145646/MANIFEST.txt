@@ -1,0 +1,19 @@
+blind-pre-beautification_2026-05-14_145646
+
+Purpose
+- Small blind mobile review before beautification.
+- Focus on blocker-level usability only.
+
+Packet Files
+- screen-01-mobile.png -> screenshots-e2e/large-state-mobile/01-dashboard-large-state.png.png
+- screen-02-mobile.png -> screenshots-e2e/large-state-mobile/02-active-plan-detail-large-state.png.png
+- screen-03-mobile.png -> screenshots-e2e/large-state-mobile/03-history-overview-large-state.png.png
+- screen-04-mobile.png -> screenshots-e2e/large-state-mobile/04-history-archived-filter-large-state.png.png
+- screen-05-mobile.png -> screenshots-e2e/large-state-mobile/05-history-active-filter-large-state.png.png
+- screen-06-mobile.png -> screenshots-e2e/custom-library-roundtrip/01-exercise-library-imported.png
+- screen-07-mobile.png -> screenshots-e2e/exercise-reference-protection/01-protected-activity-detail.png
+- screen-08-mobile.png -> screenshots-e2e/custom-library-roundtrip/04-routine-detail-saved.png
+- screen-09-mobile.png -> screenshots-e2e/live-plan-editor/01-editor-start.png
+- screen-10-mobile.png -> screenshots-e2e/live-plan-editor/03-remap-review.png
+- PROMPT_FOR_WEB_BLIND_REVIEW.txt
+- MANIFEST.txt

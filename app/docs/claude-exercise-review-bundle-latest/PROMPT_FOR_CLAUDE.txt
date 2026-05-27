@@ -1,0 +1,85 @@
+Please review this UI architecture using BOTH:
+1. the attached screenshots
+2. actual web research on comparable products and platform guidance
+
+Important:
+- This is a STRUCTURE / INFORMATION-ARCHITECTURE review, not a beautification review.
+- Do not rely on intuition alone.
+- Please do real web research before answering.
+- Please explicitly reference what patterns you found in real products/guidelines.
+- Please challenge the current direction if it is weak.
+
+Scope for this review:
+- Exercise Library
+- Exercise Detail
+- The compact/detail contract between them
+
+Context:
+This app is a structured training / practice app with this hierarchy:
+- Activity = canonical identity record
+- Routine = executable script built from activity blocks
+- Stage = progression layer
+- Plan / Active Plan = higher-level structure and runtime state
+
+Current architectural rule:
+- Exercise Detail is the canonical owner surface for an activity record.
+- Higher layers should embed only the compact exercise preview, not full Exercise Detail.
+
+Current exercise-library/detail model:
+- Exercise Library currently shows compact cards with:
+  - title
+  - small primary visual
+  - focus summary
+  - equipment summary
+  - tracking summary
+- Exercise Detail currently shows:
+  - large primary visual
+  - title / subtitle / badges
+  - key facts
+  - deeper profile/context in disclosure sections
+
+Current visual/domain rule:
+- physical and mind-body records use a body visual
+- mental-only records use a practice-profile visual
+
+Current open questions:
+1. Is the library geometry still too card-heavy for what is mostly homogeneous discovery content?
+2. Should the compact visual communicate movement/practice identity first, or target/body area first?
+3. Is Exercise Detail already structurally ready for beautification?
+4. Do physical, mental, and mind-body records need different detail treatments or is the current owner-surface contract sufficient?
+5. Is one more framework pass still needed before beautification for this screen group?
+
+Please use the screenshots to evaluate:
+- desktop exercise library
+- desktop exercise detail
+- phone-portrait exercise library
+- phone-portrait exercise detail
+- phone-landscape exercise library
+- phone-landscape exercise detail
+- tablet-portrait exercise library
+- tablet-portrait exercise detail
+
+Please also use the attached SCREEN_CONTRACTS.md as local product context.
+
+Please do web research on:
+- Apple HIG / Material guidance for lists, cards, grouped content, and progressive disclosure
+- workout trackers / strength apps with exercise discovery + exercise detail
+- fitness / practice products that distinguish discovery/library from canonical detail surfaces
+
+Please answer these questions:
+1. What is structurally working now?
+2. What is still structurally wrong or ambiguous?
+3. Is the ExerciseCompact / ExerciseDetail contract sound?
+4. Is the library geometry right, or should it be more list-like / less card-heavy?
+5. Should the compact visual communicate movement/practice identity first?
+6. Is Exercise Detail already ready for beautification, or does it still need one more framework pass?
+7. Do physical, mental, and mind-body records need different detail treatments?
+8. Do we still need another framework pass before beautification for this screen group?
+
+Please structure your response as:
+- Screenshot-based review
+- Research findings from real products/guidelines
+- What is working
+- What is still structurally wrong
+- Recommended exercise-library/detail refinements
+- Whether another framework pass is needed before beautification

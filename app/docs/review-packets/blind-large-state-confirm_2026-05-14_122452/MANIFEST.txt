@@ -1,0 +1,21 @@
+Packet: blind-large-state-confirm_2026-05-14_122452
+Created: 2026-05-14 12:24:52
+Source screenshots:
+- screenshots-e2e/large-state-mobile/01-dashboard-large-state.png.png
+- screenshots-e2e/large-state-mobile/02-active-plan-detail-large-state.png.png
+- screenshots-e2e/large-state-mobile/03-history-overview-large-state.png.png
+- screenshots-e2e/large-state-mobile/04-history-archived-filter-large-state.png.png
+- screenshots-e2e/large-state-mobile/05-history-active-filter-large-state.png.png
+
+Included files:
+- screen-01-mobile.png
+- screen-02-mobile.png
+- screen-03-mobile.png
+- screen-04-mobile.png
+- screen-05-mobile.png
+- PROMPT_FOR_WEB_BLIND_REVIEW.txt
+- MANIFEST.txt
+
+Purpose:
+- blocker-only blind mobile confirmation review after the history orientation and copy cleanup pass
+- focus on home clarity, active-plan detail clarity, and mobile history readability under a fuller live/archived dataset

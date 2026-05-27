@@ -1,0 +1,95 @@
+Please review this UI architecture using BOTH:
+1. the attached screenshots
+2. actual web research on comparable products and platform guidance
+
+Important:
+- This is a STRUCTURE / INFORMATION-ARCHITECTURE / EXECUTION-MODEL review, not a beautification review.
+- Do not rely on intuition alone.
+- Please do real web research before answering.
+- Please explicitly reference what patterns you found in real products/guidelines.
+- Please challenge the current direction if it is weak.
+
+Context:
+This app is a structured training / practice app with this hierarchy:
+- Exercise / Practice = smallest stable owner record
+- Routine = reusable composed session block
+- Stage = progression layer over routines / rest / tests
+- Plan = staged structure
+- Active Plan = runtime state
+
+What has already been done:
+- overview/action screens were split from Study/detail screens
+- Exercise and Routine have canonical read-only detail surfaces
+- physical items use body-target visuals
+- mental items use family-driven visuals instead of body maps
+- routine detail now distinguishes:
+  - activity entry
+  - nested execution blocks inside the entry
+  - between-entry transition connector
+- simple repeated entries now render as a compact visible work/rest pattern lane
+- explicit advanced blocks are supported in schema/runtime, but the editor still mostly authors the simpler repeated-set shape
+
+What is still unresolved:
+1. Routine execution language
+   - Is the current entry structure actually scanable enough?
+   - Do the work / rest / transition cues communicate execution clearly?
+   - Are the metric tokens still too text-like?
+   - Is one more framework pass needed for a clearer metric glyph language?
+
+2. Exercise compact visual meaning
+   - Physical cards still show target/body emphasis.
+   - But should the compact visual tell you what movement/practice this is at a glance?
+   - Is the compact visual still underdefined?
+
+3. Plan / stage compression
+   - Blueprint detail and active-plan detail may still be too text-heavy.
+   - Active-plan study may still need more compression or better information order.
+
+4. Framework vs beautification boundary
+   - Are we ready for beautification now?
+   - Or is one more framework pass still needed first?
+
+Please use the screenshots to evaluate:
+- Exercise / Practice library cards
+- Exercise detail
+- Routine detail
+- Blueprint detail
+- Active plan detail
+- Active plan study
+
+Please also do web research on:
+- Apple HIG / Material guidance for lists, grouped hierarchy, scanning, structured rows, and detail views
+- workout apps / exercise databases / workout trackers
+- interval timer / circuit timer products
+- meditation / breath-practice apps
+- course / path / module / lesson products
+
+Please answer these questions:
+1. What is structurally working now?
+2. What still needs framework work before beautification?
+3. Is the routine execution model correct as:
+   - activity header
+   - nested execution lane
+   - between-entry transition
+4. For simple repeated entries, is a compact visible work/rest lane the right approach?
+5. What should the routine metric language communicate first:
+   - reps / duration / load / rest
+   - flow / rhythm
+   - both, and how?
+6. Is the exercise compact visual better as:
+   - target-first
+   - movement/practice-first
+   - hybrid
+7. What is still too text-heavy in blueprint detail, active-plan detail, or stage study?
+8. What real products or guidelines support your recommendations?
+9. Are we ready for beautification, or do you recommend one more framework pass first?
+
+Please structure your response as:
+- Screenshot-based review
+- Research findings from real products/guidelines
+- What is working
+- What still needs framework work
+- Recommended routine execution contract
+- Recommended exercise compact visual contract
+- Recommended plan / stage refinements
+- Whether beautification should start now or wait
