@@ -1,0 +1,44 @@
+Use the screenshots in this folder only.
+
+Treat this as a blind mobile UI/UX deep review.
+Do not assume any code, database contracts, developer specifications, or hidden app behavior.
+Review and analyze only what is visually communicated in the screenshots.
+
+Important rules:
+- These filenames (screen-01-mobile.png to screen-17-mobile.png) are intentionally neutral to avoid leaking screen roles.
+- Assume this is a single integrated mobile-portrait application.
+- Do not infer more than the screenshots actually support.
+- If something is uncertain or ambiguous, highlight it clearly.
+- Label findings as `Observed`, `Unclear`, or `Inferred`.
+- Treat only `Observed` issues as confirmed UX problems.
+
+Please answer the following questions in this order:
+
+1. What is each screen trying to help the user do? Group them logically if you notice they belong to the same flow.
+2. What are the main objects and relationships represented in the interface? (e.g. plans, stages, routines, activities, sets).
+3. Which elements appear interactive on each screen? How does a user distinguish interactive components from static data labels?
+4. What do you think happens when each major interactive element (buttons, cards, inputs, tags, select fields) is tapped?
+5. Which UI text labels, headings, or instructions feel vague, duplicated, technical/internal, or misleading?
+6. Which screens feel genuinely mobile-first (optimized for touch, thumb reach, dynamic inline expansions) and which feel cramped, overly dense, or desktop-derived?
+
+Then evaluate these cross-screen user tasks based only on the screenshots:
+- Determine what to do next/today right from the home screen
+- Understand the current stage and progression rule of an active plan
+- Select a stage and understand how stage study works inline on a mobile phone
+- Browse the exercise library and inspect a specific exercise's details, targets, and cues
+- Edit a reusable routine (add/reorder/modify sets and attributes) using the routine editor
+- Create, configure, or edit a master blueprint and its stages/milestones from scratch
+- Analyze workout history, switch between active plan histories, and view specific logged sets
+- Start and execute a live workout using the player, understanding set completion, failing a set, skipping, and rest-step pacing with zero instructions
+
+For each of these tasks, evaluate and classify the friction level as:
+- **Easy**: Smooth, clear signifiers, zero guesswork
+- **Mixed**: Visible but requires some interpretation or minor search
+- **Fragile**: Highly ambiguous, easy to make mistakes, or visually overwhelming
+
+Finally, provide:
+- **Top 5 Observed mobile UX problems**: Ranked by severity for touch and portrait usage.
+- **Anything that is still Unclear from UI**: Things you could not resolve from the screenshots alone.
+- **Final UX Verdict**: Select one of: `No clear blocker`, `One narrow pass`, or `Clear blocker`.
+
+Keep your analysis critical, objective, and grounded in what a first-time mobile user would see and understand.

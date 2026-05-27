@@ -1,0 +1,29 @@
+blind-poco-x6-deep_2026-05-27_081500
+
+Files in this packet:
+- screen-01-mobile.png
+- screen-02-mobile.png
+- screen-03-mobile.png
+- screen-04-mobile.png
+- screen-05-mobile.png
+- screen-06-mobile.png
+- screen-07-mobile.png
+- screen-08-mobile.png
+- screen-09-mobile.png
+- screen-10-mobile.png
+- screen-11-mobile.png
+- screen-12-mobile.png
+- screen-13-mobile.png
+- screen-14-mobile.png
+- screen-15-mobile.png
+- screen-16-mobile.png
+- screen-17-mobile.png
+- REVIEW_RESULTS.md
+- PROMPT_FOR_WEB_BLIND_REVIEW.txt
+- MANIFEST.txt
+
+Notes:
+- This is a curated blind deep UI/UX review packet limited to 20 files total (17 screens, 1 manifest, 1 review prompt).
+- Filenames are intentionally neutral (screen-01-mobile.png through screen-17-mobile.png) to prevent semantic leaks.
+- All screenshots are mobile-portrait captures at 442x983 resolution (Poco X6 representative viewport) with deviceScaleFactor 2.75.
+- Covers the entire integrated application flow: plan homepages, inline stage progression, technical libraries, routine forms, master blueprint design, workout history rails, and the live set/rest workout player.
